@@ -133,6 +133,23 @@ always present. Read-only JSON of the node is available under a disclosure for d
   device, with a 150ms crossfade, and pushes history so browser back works.
 - A "Present" variant (`⌘⇧P`) hides the shell and shows one frame full-bleed for demos.
 
+### Diagram editor (M4)
+
+`/d/:id` serves a third runtime, `diagram.js` (~9 KB gzipped), in the same shell as the screen
+editor. It shares the patch core, so undo works the same way through `invertOps`.
+
+- Dragging a node moves it, and its arrows re-route live through the shared router
+  (`src/shared/route.ts`). Dropping it writes `position`, which pins it.
+- Dragging the ● handle of the selected node onto another node adds an edge. The arrow is then
+  selected, with its label field focused.
+- Double-click a node's label, tech or description, an arrow label, or a group title to edit it
+  in place.
+- The inspector covers nodes (kind, tech, group, icon, emphasis, unpin), arrows (label, style,
+  both ways, reverse) and groups (label, lane).
+- ⌫ deletes. Deleting a node removes its edges in the same patch, so undo restores both.
+- **Auto-layout** removes every pin. `N` adds a node.
+- After each save the board re-renders from the server, which owns layout.
+
 ### As built (M3)
 
 There are two browser runtimes: `editor.js` and `player.js` (~4 KB gzipped). They share

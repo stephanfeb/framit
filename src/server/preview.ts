@@ -14,6 +14,7 @@ import { loadRuntime } from "./runtime-bundle.js";
 import { readFont } from "./assets.js";
 import { renderFlowPage, renderPlayerPage } from "../renderer/prototype.js";
 import { buildFlowView, buildPlayer } from "./prototype.js";
+import { renderBoard, renderDiagramEditorPage, renderDiagramPage } from "../renderer/diagram.js";
 import { renderSwatchPage } from "../renderer/swatch.js";
 import type { ChangeEvent, DocKind } from "../store/store.js";
 import { DOC_KINDS } from "../store/store.js";
@@ -81,9 +82,10 @@ export class PreviewServer {
     app.get("/", async (c) => {
       const screens = await ws.store.list("screen");
       const flows = await ws.store.list("flow");
+      const diagrams = await ws.store.list("diagram");
       const themes = [...new Set([...(await ws.store.list("theme")).map((t) => t.id), ...Object.keys(BUILTIN_THEMES)])];
       const project = await ws.store.getProject();
-      return c.html(indexPage(project.name, screens, flows, themes));
+      return c.html(indexPage(project.name, screens, flows, diagrams, themes));
     });
 
     // Mutating requests must come from our own pages. The server is loopback-only, but a
@@ -107,6 +109,35 @@ export class PreviewServer {
       const { doc, screen, theme } = await ws.screen(c.req.param("id"));
       if (c.req.query("static") !== undefined) return c.html(renderScreenPage(screen, theme, { bodyEnd: liveReload("screen", screen.id) }).html);
       return c.html(renderEditorPage(screen, theme, { kind: "screen", id: screen.id, revision: doc.revision }, { editorCss: EDITOR_CSS }));
+    });
+
+    app.get("/assets/diagram.js", async (c) => {
+      const { code } = await loadRuntime("diagram");
+      return c.body(code, 200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" });
+    });
+
+    app.get("/d/:id", async (c) => {
+      const { doc, diagram, theme, layout } = await ws.diagram(c.req.param("id"));
+      if (c.req.query("static") !== undefined) return c.html(renderDiagramPage(diagram, layout, theme, { bodyEnd: c.req.query("live") === "0" ? "" : liveReload("diagram", diagram.id) }));
+      return c.html(renderDiagramEditorPage(diagram, layout, theme, { kind: "diagram", id: diagram.id, revision: doc.revision }, { editorCss: EDITOR_CSS }));
+    });
+
+    app.get("/api/render/diagram/:id", async (c) => {
+      const { doc, diagram, theme, layout } = await ws.diagram(c.req.param("id"));
+      const b = renderBoard(diagram, layout, theme);
+      return c.json({ revision: doc.revision, html: b.html, width: b.width, height: b.height, offset: b.offset, warnings: layout.warnings });
+    });
+
+    app.patch("/api/doc/diagram/:id", async (c) => {
+      const body = (await c.req.json()) as { baseRevision?: number; ops?: unknown[] };
+      const ops = z.array(PatchOp).min(1).parse(body.ops ?? []);
+      try {
+        const r = await ws.patchDiagram(c.req.param("id"), ops, { baseRevision: body.baseRevision, source: c.req.header("x-framit-client") ?? "browser" });
+        return c.json({ revision: r.doc.revision, rebased: r.rebased, doc: r.doc });
+      } catch (err) {
+        if (err instanceof FramitError && err.code === "REVISION") return c.json(err.toJSON(), 409);
+        throw err;
+      }
     });
 
     app.get("/assets/player.js", async (c) => {
@@ -205,9 +236,9 @@ const PAGE_CSS = `body{margin:0;font:14px/1.5 system-ui,sans-serif;background:#f
 
 type Summary = { id: string; name?: string; revision: number };
 
-function indexPage(name: string, screens: Summary[], flows: Summary[], themes: string[]) {
+function indexPage(name: string, screens: Summary[], flows: Summary[], diagrams: Summary[], themes: string[]) {
   const items = (xs: string[]) => (xs.length ? `<ul>${xs.join("")}</ul>` : `<p class="m">None yet.</p>`);
-  return `<!doctype html><meta charset="utf-8"><title>${esc(name)} · Framit</title><style>${PAGE_CSS}</style><main><h1>${esc(name)}</h1><div class="m">Framit preview</div><h2>Screens</h2>${items(screens.map((s) => `<li><a href="/s/${esc(s.id)}">${esc(s.name ?? s.id)}</a><span class="m">${esc(s.id)} · rev ${s.revision} · <a href="/p/screen/${esc(s.id)}">present</a></span></li>`))}<h2>Flows</h2>${items(flows.map((f) => `<li><a href="/f/${esc(f.id)}">${esc(f.name ?? f.id)}</a><span class="m">${esc(f.id)} · rev ${f.revision} · <a href="/p/flow/${esc(f.id)}">play</a></span></li>`))}<h2>Themes</h2>${items(themes.map((t) => `<li><a href="/t/${esc(t)}">${esc(t)}</a></li>`))}</main>`;
+  return `<!doctype html><meta charset="utf-8"><title>${esc(name)} · Framit</title><style>${PAGE_CSS}</style><main><h1>${esc(name)}</h1><div class="m">Framit preview</div><h2>Screens</h2>${items(screens.map((s) => `<li><a href="/s/${esc(s.id)}">${esc(s.name ?? s.id)}</a><span class="m">${esc(s.id)} · rev ${s.revision} · <a href="/p/screen/${esc(s.id)}">present</a></span></li>`))}<h2>Diagrams</h2>${items(diagrams.map((d) => `<li><a href="/d/${esc(d.id)}">${esc(d.name ?? d.id)}</a><span class="m">${esc(d.id)} · rev ${d.revision}</span></li>`))}<h2>Flows</h2>${items(flows.map((f) => `<li><a href="/f/${esc(f.id)}">${esc(f.name ?? f.id)}</a><span class="m">${esc(f.id)} · rev ${f.revision} · <a href="/p/flow/${esc(f.id)}">play</a></span></li>`))}<h2>Themes</h2>${items(themes.map((t) => `<li><a href="/t/${esc(t)}">${esc(t)}</a></li>`))}</main>`;
 }
 
 function errorPage(e: { code: string; message: string; hint?: string }) {

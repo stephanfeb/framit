@@ -62,7 +62,7 @@ acceptance"). It opens the exported file from `file://` with every network reque
 clicks through all three screens. The ~170 KB file includes both fonts. ADR-010 covers the player
 design.
 
-## M4 · Diagrams
+## M4 · Diagrams ✅
 
 - `diagram` schema, elkjs layout, node kinds with icons, groups and lanes.
 - SVG edge overlay with orthogonal routing and labels.
@@ -71,6 +71,11 @@ design.
 
 **Done when:** "draw the system context for this repo" yields a diagram you would put in an
 architecture doc, and you can tidy it by hand.
+
+*Shipped:* elkjs 0.12.0 (pinned). The hand-tidying half of the criterion is an automated test
+(`test/diagram-editor.test.ts`, "M4 acceptance"). It drags a node to pin it, renames a node and
+relabels an arrow, and a new MCP session then reads exactly that. The blind-session half is in
+[docs/examples](examples/README.md). Layout design: ADR-011.
 
 ## M5 · Catalogue and polish
 

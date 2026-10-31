@@ -188,3 +188,27 @@ instant.
 **Consequences.** Reachability is capped at 60 screens. A screen linked only from outside the
 start set is absent, and its hotspot toasts "No screen". The editor's Preview mode fetches frames
 from the server instead, because there the documents change while you look at them.
+
+---
+
+## ADR-011 · Diagram layout runs on the server; a small router handles pins
+
+**Status:** accepted · 2026-10-31
+
+**Decision.** The server runs elkjs (layered, orthogonal edge routing, groups as compound
+nodes). It estimates node sizes from text, and the renderer draws each node at exactly that size.
+Pinned nodes are moved to their `position` after layout, and only the edges touching them are
+re-routed, by a dependency-free orthogonal router (`src/shared/route.ts`). The browser uses the
+same router to re-route live while a node is dragged. Lanes are stacked into full-width bands
+after layout.
+
+**Reasons.** The MCP server must return a screenshot and node positions without a browser
+round trip. Fixed node sizes keep layout deterministic and testable. Elk's layered algorithm
+cannot hold individual nodes at fixed coordinates, so "elk for everything else, router for pins"
+keeps elk's quality where nothing was touched. Sharing the router means the live preview while
+dragging matches the saved result.
+
+**Consequences.** Text that is much longer than the estimate is clipped. Labels are meant to be
+short, and `write_diagram` warns about long ones. The router does not spread several edges
+across one side of a node, and it can cross other nodes in crowded spots. **Auto-layout**
+(removing pins) gets elk's routing back. Revisit with libavoid if hand-tidied diagrams get large.

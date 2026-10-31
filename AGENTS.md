@@ -130,7 +130,7 @@ bd prime                # Refresh Beads context
 
 ```bash
 npm install
-npm run build      # dist/cli.js (server) + dist/runtime/{editor,player}.js (browser runtimes)
+npm run build      # dist/cli.js (server) + dist/runtime/{editor,player,diagram}.js (browser runtimes)
 npm test           # vitest; test/screenshot.test.ts needs Chromium or Chrome
 npm run typecheck
 ```
@@ -146,6 +146,8 @@ Local MCP server that renders wireframes as HTML. Design docs live in `docs/` (s
 - `src/renderer/` is pure `(document, theme) -> HTML`; `base-css.ts` reads only `--fx-*` variables
   from the compiled theme.
 - `src/store/` is the `.framit/` document store (atomic writes, revisions, node-ID JSON Patch).
+- `src/diagram/` lays diagrams out with elkjs; `src/shared/` holds code shared with the browser
+  runtimes in `src/runtime/` (patch core, orthogonal router).
 - `src/server/` wires the MCP tools, the Hono preview server and the Playwright screenshotter.
 
 ## Conventions & Patterns

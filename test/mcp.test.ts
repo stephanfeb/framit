@@ -63,6 +63,7 @@ describe("framit MCP server", () => {
         "create_theme", "delete_screen", "delete_theme", "describe_dsl", "duplicate_screen", "get_project", "get_theme", "init_project",
         "list_components", "list_screens", "list_themes", "patch_screen", "read_screen", "render", "update_theme", "write_screen",
         "write_flow", "patch_flow", "read_flow", "list_flows", "delete_flow", "export",
+        "write_diagram", "patch_diagram", "read_diagram", "list_diagrams", "delete_diagram",
       ].sort(),
     );
     expect(client.getInstructions()).toContain("describe_dsl");

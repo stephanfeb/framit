@@ -32,6 +32,12 @@ The server roots itself at the client's working directory and stores everything 
 > Screen and theme documents are passed as plain objects and validated server-side, so the tool list stays
 > small and validation errors can carry hints. `screenshot`, `open` and `lint` are not built yet.
 
+> **Implementation notes (M4).** `write_diagram`, `patch_diagram`, `read_diagram`, `list_diagrams`,
+> `delete_diagram`. Results carry the editor `url`, `size`, and `layout`: each node's computed box,
+> with `pinned` set when a person dragged it. They also include a screenshot and lint warnings:
+> unconnected nodes, long labels, too many nodes, and pins that overlap. `describe_dsl kind=diagram`
+> is the authoring guide. `render` and `export` accept `kind: "diagram"`.
+
 > **Implementation notes (M3).** Flows: `write_flow`, `patch_flow`, `read_flow`, `list_flows`,
 > `delete_flow`; `describe_dsl kind=flow` explains them. Flow results carry the canvas `url`, a `playUrl`
 > (present mode), the resolved steps and edges (derived from `to` hotspots plus explicit edges), and
@@ -70,7 +76,7 @@ The server roots itself at the client's working directory and stores everything 
 ### Diagrams and flows
 
 Same CRUD shape: `write_diagram`, `patch_diagram`, `read_diagram`, `list_diagrams`,
-`delete_diagram` (M4), and the same five for flows (built in M3). `write_diagram` output includes the computed
+`delete_diagram` (built in M4), and the same five for flows (built in M3). `write_diagram` output includes the computed
 layout (node positions after elk) so the model can reason about it or pin nodes.
 
 ### Rendering and export

@@ -3,7 +3,7 @@
 import { build } from "esbuild";
 
 await build({
-  entryPoints: { editor: "src/runtime/editor.ts", player: "src/runtime/player.ts" },
+  entryPoints: { editor: "src/runtime/editor.ts", player: "src/runtime/player.ts", diagram: "src/runtime/diagram.ts" },
   outdir: "dist/runtime",
   bundle: true,
   format: "esm",

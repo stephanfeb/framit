@@ -1,0 +1,168 @@
+{
+  "id": "system-context",
+  "name": "Framit system context",
+  "direction": "LR",
+  "nodes": [
+    {
+      "id": "user",
+      "label": "Designer / Developer",
+      "kind": "actor"
+    },
+    {
+      "id": "llm",
+      "label": "MCP client",
+      "kind": "client",
+      "tech": "Claude Code, etc."
+    },
+    {
+      "id": "browser",
+      "label": "Browser",
+      "kind": "client",
+      "tech": "Canvas + editor runtime"
+    },
+    {
+      "id": "mcp",
+      "label": "MCP server",
+      "kind": "service",
+      "tech": "MCP SDK, stdio",
+      "group": "framit",
+      "description": "Tools for screens, themes, diagrams, flows, export"
+    },
+    {
+      "id": "preview",
+      "label": "Preview & edit server",
+      "kind": "service",
+      "tech": "Hono, 127.0.0.1",
+      "group": "framit",
+      "emphasis": true,
+      "description": "Serves canvas, applies JSON Patches, pushes SSE"
+    },
+    {
+      "id": "renderer",
+      "label": "Renderer",
+      "kind": "function",
+      "tech": "Pure doc+theme to HTML",
+      "group": "framit"
+    },
+    {
+      "id": "layout",
+      "label": "Diagram layout",
+      "kind": "function",
+      "tech": "elkjs",
+      "group": "framit"
+    },
+    {
+      "id": "shot",
+      "label": "Screenshotter",
+      "kind": "service",
+      "tech": "Playwright",
+      "group": "framit"
+    },
+    {
+      "id": "store",
+      "label": ".framit/ store",
+      "kind": "storage",
+      "tech": "JSON files, atomic writes",
+      "group": "framit",
+      "description": "Screens, themes, diagrams, flows, exports"
+    },
+    {
+      "id": "chromium",
+      "label": "Headless Chromium",
+      "kind": "external"
+    }
+  ],
+  "groups": [
+    {
+      "id": "framit",
+      "label": "Framit (one process per client session)"
+    }
+  ],
+  "edges": [
+    {
+      "from": "user",
+      "to": "llm",
+      "label": "Prompts",
+      "id": "e_4cab"
+    },
+    {
+      "from": "user",
+      "to": "browser",
+      "label": "Views & edits",
+      "id": "e_8wwz"
+    },
+    {
+      "from": "llm",
+      "to": "mcp",
+      "label": "MCP over stdio",
+      "bidirectional": true,
+      "id": "e_e898"
+    },
+    {
+      "from": "browser",
+      "to": "preview",
+      "label": "HTTP + PATCH",
+      "bidirectional": true,
+      "id": "e_4fn1"
+    },
+    {
+      "from": "preview",
+      "to": "browser",
+      "label": "SSE change events",
+      "style": "dashed",
+      "id": "e_zzpy"
+    },
+    {
+      "from": "mcp",
+      "to": "store",
+      "label": "Read / write docs",
+      "id": "e_vt3j"
+    },
+    {
+      "from": "preview",
+      "to": "store",
+      "label": "Apply patches",
+      "id": "e_n2qv"
+    },
+    {
+      "from": "mcp",
+      "to": "renderer",
+      "label": "Render",
+      "id": "e_dgrv"
+    },
+    {
+      "from": "preview",
+      "to": "renderer",
+      "label": "Render pages",
+      "id": "e_sdzs"
+    },
+    {
+      "from": "renderer",
+      "to": "layout",
+      "label": "Diagram layout",
+      "id": "e_52as"
+    },
+    {
+      "from": "mcp",
+      "to": "shot",
+      "label": "Screenshot",
+      "id": "e_r0vh"
+    },
+    {
+      "from": "shot",
+      "to": "chromium",
+      "label": "Drives",
+      "id": "e_wdnq"
+    },
+    {
+      "from": "chromium",
+      "to": "preview",
+      "label": "Loads frames",
+      "style": "dashed",
+      "id": "e_fhhr"
+    }
+  ],
+  "kind": "diagram",
+  "revision": 1,
+  "updatedAt": "2026-10-31T14:50:36.557Z"
+}

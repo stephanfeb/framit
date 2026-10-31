@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import path from "node:path";
 import { FramitError } from "../errors.js";
 import { isValidDocId } from "./ids.js";
-import { assignScreenIds } from "./nodes.js";
+import { assignDiagramIds, assignScreenIds } from "./nodes.js";
 
 export const STORE_DIRNAME = ".framit";
 
@@ -169,6 +169,7 @@ export class Store {
       const { revision: _r, updatedAt: _u, ...body } = structuredClone(input);
       const next = { ...body, kind, id } as Record<string, unknown>;
       if (kind === "screen") assignScreenIds(next);
+      if (kind === "diagram") assignDiagramIds(next);
 
       if (current) {
         const { revision: _cr, updatedAt: _cu, ...currentBody } = current;

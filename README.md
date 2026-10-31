@@ -4,7 +4,7 @@ A local MCP server that turns text descriptions into editable, themed wireframes
 mobile screens, architecture diagrams, and user flows. Output is a live HTML canvas you can
 edit in the browser, and edits round-trip to the source so later sessions stay consistent.
 
-Status: M3 (prototypes, flows, export) complete. See [docs/](docs/README.md) and `docs/07-roadmap.md`.
+Status: M4 (architecture diagrams) complete. See [docs/](docs/README.md) and `docs/07-roadmap.md`.
 
 ## Quick orientation
 
@@ -38,7 +38,7 @@ claude mcp add -s user framit -- node /absolute/path/to/framit/dist/cli.js serve
 Framit stores everything in `.framit/` under the directory Claude Code was started in.
 Override with `--root <dir>` or the `FRAMIT_ROOT` environment variable.
 
-### Tools available today (M3)
+### Tools available today (M4)
 
 | Area | Tools |
 |------|-------|
@@ -47,6 +47,7 @@ Override with `--root <dir>` or the `FRAMIT_ROOT` environment variable.
 | Themes | `list_themes`, `get_theme`, `create_theme`, `update_theme`, `delete_theme` |
 | Screens | `write_screen`, `patch_screen`, `read_screen`, `list_screens`, `delete_screen`, `duplicate_screen` |
 | Flows | `write_flow`, `patch_flow`, `read_flow`, `list_flows`, `delete_flow` |
+| Diagrams | `write_diagram`, `patch_diagram`, `read_diagram`, `list_diagrams`, `delete_diagram` |
 | Output | `render` (preview URL + screenshots), `export` (PNG, PDF, offline HTML prototype) |
 
 Writes return a PNG of every frame so the calling model can check its work. Screenshots use
@@ -65,5 +66,10 @@ Prototypes: give a button, link, nav, tab bar or list item a `to` prop naming an
 present one frame full-window. A flow (`/f/<id>`) lays screens out in order with arrows from their
 hotspots; **▶ Play** clicks through it. `export` with `format: "html"` writes one file that works
 offline: fonts, theme and every reachable screen inlined.
+
+Diagrams: ask for an architecture drawing ("draw the system context for this repo") and Framit lays
+it out with elkjs: layered, with orthogonal arrows, in the project's theme. Open `/d/<id>` to tidy it.
+Drag nodes, which pins them; drag the ● handle onto another node to connect them; double-click any
+text to edit it. **Auto-layout** removes the pins again.
 
 See [docs/examples](docs/examples/README.md) for what a blind session produces.

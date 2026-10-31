@@ -66,7 +66,7 @@ export class Viewport {
     this.apply();
   }
 
-  /** Fit all frames (or the given canvas-space rect) in view. */
+  /** Fit all frames or the diagram board (or the given canvas-space rect) in view. */
   fit(rect?: { x: number; y: number; w: number; h: number }) {
     const b = rect ?? this.bounds();
     if (!b) return;
@@ -78,7 +78,7 @@ export class Viewport {
   }
 
   bounds() {
-    const slots = Array.from(this.canvas.querySelectorAll<HTMLElement>(".fx-frame-slot"));
+    const slots = Array.from(this.canvas.querySelectorAll<HTMLElement>(".fx-frame-slot, .fx-board"));
     if (!slots.length) return undefined;
     const xs = slots.map((s) => s.offsetLeft);
     const ys = slots.map((s) => s.offsetTop);

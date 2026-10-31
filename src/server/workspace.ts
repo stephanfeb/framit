@@ -8,6 +8,8 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { compileThemeCss } from "../renderer/theme-css.js";
 import { applyPatch, type PatchOp } from "../store/patch.js";
+import { checkDiagramRefs, Diagram, type DiagramT } from "../schema/diagram.js";
+import { layoutDiagram, type DiagramLayout } from "../diagram/layout.js";
 
 /**
  * Domain operations shared by the MCP tools and the preview server: theme resolution
@@ -84,6 +86,44 @@ export class Workspace {
     validate(Screen, next, "patched screen");
     if (typeof next.theme === "string") await this.theme(next.theme);
     const { doc, changed } = await this.store.write("screen", next, { expectedRevision: current.revision, source: opts.source });
+    return { doc, changed, rebased: stale };
+  }
+
+  async diagram(id: string): Promise<{ doc: StoredDoc; diagram: DiagramT; theme: ResolvedTheme; layout: DiagramLayout }> {
+    const doc = await this.store.read("diagram", id);
+    const diagram = validate(Diagram, doc, `diagram "${id}"`);
+    checkDiagramRefs(diagram);
+    const theme = await this.theme(diagram.theme ?? (await this.defaultThemeId()));
+    return { doc, diagram, theme, layout: await layoutDiagram(diagram) };
+  }
+
+  /** Validate a diagram document (schema, references, theme) before it is saved. */
+  async checkDiagram(input: unknown): Promise<DiagramT> {
+    const d = validate(Diagram, input, "diagram");
+    checkDiagramRefs(d);
+    if (d.theme) await this.theme(d.theme);
+    return d;
+  }
+
+  /** Like patchScreen, for diagrams: id-addressed ops rebase onto newer revisions. */
+  async patchDiagram(id: string, ops: PatchOp[], opts: { baseRevision?: number; source?: string } = {}): Promise<{ doc: StoredDoc; changed: boolean; rebased: boolean }> {
+    const current = await this.store.read("diagram", id);
+    const stale = opts.baseRevision !== undefined && current.revision !== opts.baseRevision;
+    if (stale && !ops.every((o) => o.node !== undefined || (o.op === "add" && /^\/(nodes|edges|groups)\/-$/.test(o.path ?? "")))) {
+      throw new FramitError("REVISION", `Diagram "${id}" is at revision ${current.revision}, not ${opts.baseRevision}.`, { hint: "Re-read it and reapply your change.", data: { current } });
+    }
+    let next: StoredDoc;
+    try {
+      next = applyPatch(current, ops);
+    } catch (err) {
+      if (stale && err instanceof FramitError) throw new FramitError("REVISION", `Diagram "${id}" changed underneath this edit: ${err.message}`, { data: { current } });
+      throw err;
+    }
+    // Deleting a node takes its edges with it.
+    const nodeIds = new Set(((next.nodes as Array<{ id: string }>) ?? []).map((n) => n.id));
+    if (Array.isArray(next.edges)) next.edges = (next.edges as Array<{ from: string; to: string }>).filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to));
+    await this.checkDiagram(next);
+    const { doc, changed } = await this.store.write("diagram", next, { expectedRevision: current.revision, source: opts.source });
     return { doc, changed, rebased: stale };
   }
 

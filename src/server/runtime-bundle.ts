@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
  * request so it can never be stale.
  */
 
-export type RuntimeName = "editor" | "player";
+export type RuntimeName = "editor" | "player" | "diagram";
 
 const cached = new Map<RuntimeName, Promise<{ code: string }>>();
 

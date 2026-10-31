@@ -214,6 +214,15 @@ Node kinds: `service`, `database`, `queue`, `cache`, `storage`, `external`, `act
 `function`, `note`. Each has an icon and shape convention from the theme. Nodes render as HTML
 (editable like any other node); edges are an SVG overlay with orthogonal or spline routing.
 
+*As built (M4):*
+- Node ids are written by the author, because edges refer to them. Edge ids are assigned on save.
+- Nodes also take `description`, `icon` (any lucide name) and `emphasis`, which marks the system in focus.
+- Edge `style` is `solid`, `dashed` or `dotted`.
+- Groups do not nest. A group with `lane: true` is drawn as a full-width band, and lanes are stacked
+  top to bottom in order of where layout placed them.
+- Node, group and edge ids share one id space, so patches can address any of them with `node`.
+- Removing a node also removes its edges.
+
 Sequence and deployment diagrams are out of scope for v1.
 
 ## Flows

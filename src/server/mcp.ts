@@ -20,6 +20,7 @@ import { Workspace } from "./workspace.js";
 import { Flow, FLOW_GUIDE, screenHotspots, type FlowT } from "../schema/flow.js";
 import { buildFlowView, checkFlow, loadFlow, type ProtoWarning } from "./prototype.js";
 import { runExport, type ExportFormat } from "./export.js";
+import { DIAGRAM_GUIDE, Diagram, type DiagramT } from "../schema/diagram.js";
 
 const INSTRUCTIONS = `Framit turns descriptions into editable, themed wireframes (desktop and mobile screens) stored in
 .framit/ in the current project, with a local browser preview.
@@ -36,6 +37,10 @@ Prototypes: give buttons, links, nav/tab bar/list items a \`to\` prop naming ano
 navigate in Preview mode, in Present mode (/p/screen/<id>) and in exported HTML. A flow (write_flow) puts
 screens in order on one canvas with arrows; describe_dsl kind=flow explains it. export writes PNG, PDF or
 a single offline HTML prototype.
+
+Architecture drawings: write_diagram (nodes, groups/lanes, edges; laid out automatically). Call describe_dsl
+kind=diagram first. People tidy diagrams by dragging nodes, which pins them: read_diagram before
+changing one and keep the ids and positions you find.
 
 Because people edit screens in the browser, read_screen before changing an existing screen and prefer
 patch_screen, which leaves their edits intact.`;
@@ -187,6 +192,44 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
     return flowResult(doc.id, { changed }, opts.screenshots, warnings);
   }
 
+  /** A diagram's tool result: URL, computed layout, lint warnings and a screenshot of the board. */
+  async function diagramResult(id: string, extra: Record<string, unknown>, wantShot: boolean): Promise<Out> {
+    const { doc, diagram, layout } = await ws.diagram(id);
+    const url = await preview.ensureStarted();
+    const warnings: Array<{ node?: string; message: string }> = [...layout.warnings];
+    const linked = new Set(diagram.edges.flatMap((e) => [e.from, e.to]));
+    for (const n of diagram.nodes) {
+      if (!linked.has(n.id) && n.kind !== "note" && diagram.nodes.length > 1) warnings.push({ node: n.id, message: `"${n.label}" has no edges. Connect it or drop it.` });
+      if (n.label.length > 32) warnings.push({ node: n.id, message: `Label "${n.label}" is long; keep labels to 1–3 words and move detail into tech or description.` });
+    }
+    const pairs = new Set(diagram.edges.map((e) => `${e.from}\u0000${e.to}`));
+    for (const e of diagram.edges) if (e.from < e.to && pairs.has(`${e.to}\u0000${e.from}`)) warnings.push({ message: `Edges ${e.from} → ${e.to} and ${e.to} → ${e.from} both exist. Prefer one edge with bidirectional: true (and a label naming both directions) unless the two flows really differ.` });
+    if (diagram.nodes.length > 24) warnings.push({ message: `${diagram.nodes.length} nodes is a lot for one diagram; consider splitting it (context, then containers).` });
+    const images: Image[] = [];
+    if (wantShot && screenshotsEnabled) {
+      try {
+        const w = Math.ceil(layout.bounds.w + 80), h = Math.ceil(layout.bounds.h + 80);
+        const cap = await shots.capture(`${url}/d/${encodeURIComponent(id)}?static&live=0`, { width: w, height: h, scale: w > 2200 ? 1 : w < 900 ? 2 : 1.5, selector: ".fx-board", maxHeight: 6000, noIssues: true });
+        images.push({ label: `Diagram ${id} (${diagram.nodes.length} nodes, ${diagram.edges.length} edges):`, png: cap.png });
+      } catch (err) {
+        warnings.push({ message: `Screenshot unavailable: ${(err as Error).message}` });
+      }
+    }
+    const round = (v: number) => Math.round(v);
+    return {
+      data: {
+        id: doc.id,
+        revision: doc.revision,
+        ...extra,
+        url: `${url}/d/${encodeURIComponent(id)}`,
+        size: { width: round(layout.bounds.w), height: round(layout.bounds.h) },
+        layout: Object.fromEntries(Object.values(layout.nodes).map((n) => [n.id, { x: round(n.x), y: round(n.y), w: round(n.w), h: round(n.h), ...(n.pinned ? { pinned: true } : {}) }])),
+        warnings,
+      },
+      images,
+    };
+  }
+
   // ---------- project ----------
 
   mcp.registerTool(
@@ -229,21 +272,23 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
       title: "Describe the Framit DSL",
       description: "The authoring guide and full component reference for screens (and themes). Call once per session before writing screens. Set jsonSchema=true only if you need the formal JSON Schema.",
       inputSchema: {
-        kind: z.enum(["screen", "theme", "flow"]).default("screen"),
+        kind: z.enum(["screen", "theme", "flow", "diagram"]).default("screen"),
         jsonSchema: z.boolean().default(false).describe("Also return the JSON Schema (large)."),
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ kind, jsonSchema }: { kind: "screen" | "theme" | "flow"; jsonSchema: boolean }): Promise<CallToolResult> => {
+    async ({ kind, jsonSchema }: { kind: "screen" | "theme" | "flow" | "diagram"; jsonSchema: boolean }): Promise<CallToolResult> => {
       const text =
         kind === "theme"
           ? THEME_GUIDE
           : kind === "flow"
             ? FLOW_GUIDE
+            : kind === "diagram"
+              ? DIAGRAM_GUIDE
             : `${SCREEN_GUIDE}\n## Component reference\n${TYPE_LEGEND}\n\n${componentReference()}\n`;
       const content: CallToolResult["content"] = [{ type: "text", text }];
       if (jsonSchema) {
-        const schema = kind === "theme" ? ResolvedTheme : kind === "flow" ? Flow : Screen;
+        const schema = kind === "theme" ? ResolvedTheme : kind === "flow" ? Flow : kind === "diagram" ? Diagram : Screen;
         content.push({ type: "text", text: JSON.stringify(z.toJSONSchema(schema, { io: "input", unrepresentable: "any" })) });
       }
       return { content };
@@ -526,10 +571,11 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
     {
       title: "Render",
       description: "Preview URL plus fresh screenshots of a screen (optionally one frame), a flow's canvas, or a theme's swatch sheet. Use to show the user or to re-check after browser edits.",
-      inputSchema: { kind: z.enum(["screen", "theme", "flow"]).default("screen"), id: z.string(), frame: z.string().optional() },
+      inputSchema: { kind: z.enum(["screen", "theme", "flow", "diagram"]).default("screen"), id: z.string(), frame: z.string().optional() },
       annotations: { readOnlyHint: true },
     },
-    tool(async ({ kind, id, frame }: { kind: "screen" | "theme" | "flow"; id: string; frame?: string }) => {
+    tool(async ({ kind, id, frame }: { kind: "screen" | "theme" | "flow" | "diagram"; id: string; frame?: string }) => {
+      if (kind === "diagram") return diagramResult(id, {}, true);
       if (kind === "flow") return flowResult(id, {}, true);
       if (kind === "theme") {
         await ws.themeDoc(id);
@@ -627,6 +673,99 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
     }),
   );
 
+  // ---------- diagrams ----------
+
+  mcp.registerTool(
+    "write_diagram",
+    {
+      title: "Write diagram",
+      description:
+        "Create or replace an architecture diagram: nodes (kind, label, tech), groups or lanes, labelled edges. Layout is automatic (layered, orthogonal arrows). " +
+        "Returns a screenshot and each node's computed position: look at it and fix with patch_diagram. Call describe_dsl kind=diagram first. " +
+        "If the diagram exists and you did not write it this turn, read_diagram first: a person may have tidied it, and their pins live in node positions.",
+      inputSchema: {
+        diagram: Obj.describe("Diagram document: { id?, name, direction?, theme?, nodes: [{ id, label, kind?, tech?, description?, group? }], groups?: [{ id, label, lane? }], edges?: [{ from, to, label?, style?, bidirectional? }] }."),
+        expectedRevision: z.number().int().optional(),
+        screenshots: z.boolean().default(true),
+      },
+    },
+    tool(async ({ diagram, expectedRevision, screenshots }: { diagram: Record<string, unknown>; expectedRevision?: number; screenshots: boolean }) => {
+      const input: Record<string, unknown> = { ...diagram };
+      if (!input.id && typeof input.name === "string") input.id = slugify(input.name);
+      const d: DiagramT = await ws.checkDiagram(input);
+      const { doc, changed } = await store.write("diagram", { ...input, kind: "diagram", id: d.id }, { expectedRevision, source: "mcp" });
+      return diagramResult(doc.id, { changed }, screenshots);
+    }),
+  );
+
+  mcp.registerTool(
+    "patch_diagram",
+    {
+      title: "Patch diagram",
+      description:
+        "Change part of a diagram, leaving a person's tidying intact. Ops address nodes, groups and edges by id: " +
+        '{op:"replace", node:"api", path:"/label", value:"Ledger API"}; {op:"add", path:"/nodes/-", value:{id:"cache", label:"Redis", kind:"cache"}}; ' +
+        '{op:"add", path:"/edges/-", value:{from:"api", to:"cache"}}; {op:"remove", node:"e_x"} (an edge id); removing a node also removes its edges; ' +
+        '{op:"remove", node:"api", path:"/position"} unpins.',
+      inputSchema: { id: z.string(), ops: z.array(PatchOp).min(1), expectedRevision: z.number().int().optional(), screenshots: z.boolean().default(true) },
+    },
+    tool(async ({ id, ops, expectedRevision, screenshots }: { id: string; ops: PatchOp[]; expectedRevision?: number; screenshots: boolean }) => {
+      const current = await store.read("diagram", id);
+      if (expectedRevision !== undefined && current.revision !== expectedRevision) {
+        throw new FramitError("REVISION", `Diagram "${id}" is at revision ${current.revision}, not ${expectedRevision}.`, { hint: "Re-read it and reapply your change.", data: { current } });
+      }
+      const { changed } = await ws.patchDiagram(id, ops, { source: "mcp" });
+      return diagramResult(id, { changed }, screenshots);
+    }),
+  );
+
+  mcp.registerTool(
+    "read_diagram",
+    {
+      title: "Read diagram",
+      description: "The current diagram document (including a person's edits and pins), its revision, editor URL and computed layout.",
+      inputSchema: { id: z.string(), screenshots: z.boolean().default(false) },
+      annotations: { readOnlyHint: true },
+    },
+    tool(async ({ id, screenshots }: { id: string; screenshots: boolean }) => {
+      const doc = await store.read("diagram", id);
+      const r = await diagramResult(id, {}, screenshots);
+      return { data: { document: doc, ...(r.data as object) }, images: r.images };
+    }),
+  );
+
+  mcp.registerTool(
+    "list_diagrams",
+    {
+      title: "List diagrams",
+      description: "All diagrams with node and edge counts.",
+      inputSchema: {},
+      annotations: { readOnlyHint: true },
+    },
+    tool(async () => {
+      const diagrams = [];
+      for (const s of await store.list("diagram")) {
+        const d = await store.read("diagram", s.id);
+        diagrams.push({ id: s.id, name: s.name, description: d.description, nodes: (d.nodes as unknown[]).length, edges: ((d.edges as unknown[]) ?? []).length, revision: s.revision, updatedAt: s.updatedAt });
+      }
+      return { data: { diagrams, previewUrl: preview.running ?? null } };
+    }),
+  );
+
+  mcp.registerTool(
+    "delete_diagram",
+    {
+      title: "Delete diagram",
+      description: "Delete a diagram document.",
+      inputSchema: { id: z.string() },
+      annotations: { destructiveHint: true },
+    },
+    tool(async ({ id }: { id: string }) => {
+      await store.delete("diagram", id, "mcp");
+      return { data: { deleted: id } };
+    }),
+  );
+
   // ---------- export ----------
 
   mcp.registerTool(
@@ -634,18 +773,18 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
     {
       title: "Export",
       description:
-        "Write a screen or flow to disk. html: ONE self-contained file that works offline, a clickable prototype (hotspots navigate; arrow keys step through a flow). " +
+        "Write a screen, flow or diagram to disk. Diagrams: html is a static page, png one image, pdf one page. Screens and flows: html: ONE self-contained file that works offline, a clickable prototype (hotspots navigate; arrow keys step through a flow). " +
         "pdf: one page per frame (flow: per step). png: one image per frame in a folder (flow: plus an overview). Default location .framit/exports/; `out` is a path inside the project.",
       inputSchema: {
-        kind: z.enum(["screen", "flow"]).default("screen"),
+        kind: z.enum(["screen", "flow", "diagram"]).default("screen"),
         id: z.string(),
         format: z.enum(["html", "pdf", "png"]),
         frame: z.string().optional().describe("Screen exports: start at (html) or only include (png, pdf) this frame."),
         out: z.string().optional().describe("File (html, pdf) or folder (png), relative to the project root."),
       },
     },
-    tool(async ({ kind, id, format, frame, out }: { kind: "screen" | "flow"; id: string; format: ExportFormat; frame?: string; out?: string }) => {
-      const r = await runExport({ ws, preview, shots }, kind === "flow" ? { kind, id } : { kind, id, frame }, format, out);
+    tool(async ({ kind, id, format, frame, out }: { kind: "screen" | "flow" | "diagram"; id: string; format: ExportFormat; frame?: string; out?: string }) => {
+      const r = await runExport({ ws, preview, shots }, kind === "screen" ? { kind, id, frame } : { kind, id }, format, out);
       return {
         data: {
           format,

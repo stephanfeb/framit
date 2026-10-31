@@ -30,8 +30,11 @@ const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object
 export const escapeToken = (k: string) => k.replace(/~/g, "~0").replace(/\//g, "~1");
 const unescapeToken = (k: string) => k.replace(/~1/g, "/").replace(/~0/g, "~");
 
-/** Is this object a frame or a component node (i.e. addressable by id)? */
-const isAddressable = (v: Record<string, unknown>) => typeof v.id === "string" && (typeof v.type === "string" || "root" in v);
+/**
+ * Is this object addressable by id? Screen frames and component nodes, diagram nodes, groups
+ * and edges: any object with a string id below the document itself.
+ */
+const isAddressable = (v: Record<string, unknown>, ptr: string) => typeof v.id === "string" && ptr !== "";
 
 /** JSON Pointer of the frame or node with this id. */
 export function pointerOf(doc: Json, id: string): string | undefined {
@@ -42,7 +45,7 @@ export function pointerOf(doc: Json, id: string): string | undefined {
         if (r !== undefined) return r;
       }
     } else if (isObj(v)) {
-      if (v.id === id && isAddressable(v)) return ptr;
+      if (v.id === id && isAddressable(v, ptr)) return ptr;
       for (const [k, child] of Object.entries(v)) {
         const r = walk(child, `${ptr}/${escapeToken(k)}`);
         if (r !== undefined) return r;
@@ -165,7 +168,7 @@ export function applyOps<T>(doc: T, ops: Op[]): T {
 export function relativize(doc: Json, tokens: string[]): Pick<Op, "node" | "path"> {
   for (let n = tokens.length - 1; n >= 0; n--) {
     const v = getAt(doc, tokens.slice(0, n));
-    if (isObj(v) && isAddressable(v)) return { node: v.id as string, path: formatPointer(tokens.slice(n)) };
+    if (isObj(v) && isAddressable(v, formatPointer(tokens.slice(0, n)))) return { node: v.id as string, path: formatPointer(tokens.slice(n)) };
   }
   return { path: formatPointer(tokens) };
 }

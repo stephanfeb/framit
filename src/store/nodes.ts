@@ -55,3 +55,18 @@ export function assignScreenIds(doc: Json): void {
     obj.id = id;
   }
 }
+
+/** Give every diagram edge an id (nodes and groups carry author ids, which edges refer to). */
+export function assignDiagramIds(doc: Json): void {
+  const edges = Array.isArray(doc.edges) ? doc.edges.filter(isObject) : [];
+  const seen = new Set<string>();
+  for (const v of [...(Array.isArray(doc.nodes) ? doc.nodes : []), ...(Array.isArray(doc.groups) ? doc.groups : [])]) if (isObject(v) && typeof v.id === "string") seen.add(v.id);
+  for (const e of edges) if (typeof e.id === "string" && e.id) seen.add(e.id);
+  for (const e of edges) {
+    if (typeof e.id === "string" && e.id) continue;
+    let id = shortId("e");
+    while (seen.has(id)) id = shortId("e");
+    seen.add(id);
+    e.id = id;
+  }
+}

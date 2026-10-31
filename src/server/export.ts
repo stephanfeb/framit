@@ -5,6 +5,9 @@ import { renderPlayerPage, renderPrintPage, type ProtoFrame } from "../renderer/
 import { fontDataUrls } from "./assets.js";
 import type { PreviewServer } from "./preview.js";
 import { buildFlowView, buildPlayer, renderScreenFrames, type ProtoTarget, type ProtoWarning } from "./prototype.js";
+import { renderBoard, renderDiagramPage } from "../renderer/diagram.js";
+
+export type ExportTarget = ProtoTarget | { kind: "diagram"; id: string };
 import { loadRuntime } from "./runtime-bundle.js";
 import type { Screenshotter } from "./screenshot.js";
 import type { Workspace } from "./workspace.js";
@@ -27,8 +30,8 @@ export interface ExportResult {
  * Where an export goes. Default: .framit/exports/<id>.<ext> (PNG: a folder). `out` is taken
  * relative to the project root and must stay inside it (docs/02-architecture.md "Security").
  */
-export function exportPath(root: string, base: string, target: ProtoTarget, format: ExportFormat, out?: string): string {
-  const name = target.kind === "flow" ? `flow-${target.id}` : target.id;
+export function exportPath(root: string, base: string, target: ExportTarget, format: ExportFormat, out?: string): string {
+  const name = target.kind === "screen" ? target.id : `${target.kind}-${target.id}`;
   if (!out) return path.join(base, "exports", format === "png" ? name : `${name}.${format}`);
   const abs = path.resolve(root, out);
   const rel = path.relative(root, abs);
@@ -56,12 +59,13 @@ async function framesFor(ws: Workspace, target: ProtoTarget): Promise<ProtoFrame
 
 export async function runExport(
   deps: { ws: Workspace; preview: PreviewServer; shots: Screenshotter },
-  target: ProtoTarget,
+  target: ExportTarget,
   format: ExportFormat,
   out?: string,
 ): Promise<ExportResult> {
   const { ws, preview, shots } = deps;
   const dest = exportPath(ws.store.root, ws.store.base, target, format, out);
+  if (target.kind === "diagram") return exportDiagram(deps, target.id, format, dest);
 
   if (format === "html") {
     const { html, warnings } = await exportHtml(ws, target);
@@ -110,4 +114,28 @@ export async function runExport(
   await mkdir(path.dirname(dest), { recursive: true });
   await writeFile(dest, pdf);
   return { format, files: [{ path: dest, bytes: (await stat(dest)).size }], warnings: [] };
+}
+
+/** Diagrams export as one board: a static HTML page, one PNG, or a one-page PDF. */
+async function exportDiagram(deps: { ws: Workspace; shots: Screenshotter }, id: string, format: ExportFormat, dest: string): Promise<ExportResult> {
+  const { diagram, theme, layout } = await deps.ws.diagram(id);
+  const html = renderDiagramPage(diagram, layout, theme, { inlineFonts: await fontDataUrls() });
+  const warnings = layout.warnings.map((w) => ({ node: w.node, message: w.message }));
+  if (format === "html") {
+    await mkdir(path.dirname(dest), { recursive: true });
+    await writeFile(dest, html);
+    return { format, files: [{ path: dest, bytes: Buffer.byteLength(html) }], warnings };
+  }
+  const { width, height } = renderBoard(diagram, layout, theme);
+  const bytes = await deps.shots.withPage({ width, height }, async (page) => {
+    await page.setContent(html, { waitUntil: "load" });
+    await page.evaluate(() => document.fonts.ready);
+    if (format === "png") return page.locator(".fx-board").screenshot({ type: "png", scale: "device" });
+    await page.addStyleTag({ content: `@page { size: ${width}px ${height}px; margin: 0 }` });
+    return page.pdf({ printBackground: true, preferCSSPageSize: true });
+  });
+  const file = format === "png" ? path.join(dest, `${id}.png`) : dest;
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, bytes);
+  return { format, files: [{ path: file, bytes: bytes.length }], warnings };
 }
