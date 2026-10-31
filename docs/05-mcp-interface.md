@@ -26,6 +26,13 @@ The server roots itself at the client's working directory and stores everything 
 
 ## Tools
 
+> **Implementation notes (M1).** `describe_dsl` returns Markdown (guide, composition patterns, examples
+> and a component reference generated from the registry); the JSON Schema is opt-in via `jsonSchema`.
+> `create_theme` takes `from` (copy a theme as the starting point) as well as `extends` (live link).
+> Screen and theme documents are passed as plain objects and validated server-side, so the tool list stays
+> small and validation errors can carry hints. `screenshot`, `export`, `open` and `lint` are not built yet.
+
+
 ### Project
 
 | Tool | Input | Output |

@@ -60,18 +60,28 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 
 ## Build & Test
 
-_Add your build and test commands here_
-
 ```bash
-# Example:
-# npm install
-# npm test
+npm install
+npm run build      # dist/cli.js (server) + dist/runtime/editor.js (browser runtime)
+npm test           # vitest; test/screenshot.test.ts needs Chromium or Chrome
+npm run typecheck
 ```
 
 ## Architecture Overview
 
-_Add a brief overview of your project architecture_
+Local MCP server that renders wireframes as HTML. Design docs live in `docs/` (start with
+`docs/02-architecture.md` and the ADRs in `docs/06-decisions.md`).
+
+- `src/components/` is the single component registry: each component has its Zod props schema,
+  example and render function. Schema, renderer, `describe_dsl` and the swatch sheet derive from it.
+- `src/schema/` holds screen/theme schemas, tokens and the generated authoring guide.
+- `src/renderer/` is pure `(document, theme) -> HTML`; `base-css.ts` reads only `--fx-*` variables
+  from the compiled theme.
+- `src/store/` is the `.framit/` document store (atomic writes, revisions, node-ID JSON Patch).
+- `src/server/` wires the MCP tools, the Hono preview server and the Playwright screenshotter.
 
 ## Conventions & Patterns
 
-_Add your project-specific conventions here_
+- Everything inside a frame is flow layout; never add positioning to the style whitelist (ADR-002).
+- Adding a component = one `defineComponent` in `src/components/`, with an example. Nothing else.
+- Pin new dependencies to versions at least two weeks old.

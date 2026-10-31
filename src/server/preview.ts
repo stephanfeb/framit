@@ -1,0 +1,139 @@
+import { serve, type ServerType } from "@hono/node-server";
+import { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
+import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import type { AddressInfo } from "node:net";
+import { FramitError } from "../errors.js";
+import { esc } from "../renderer/html.js";
+import { placeFrames, renderFrame, renderFramePage, renderScreenPage } from "../renderer/render.js";
+import { renderSwatchPage } from "../renderer/swatch.js";
+import type { ChangeEvent, DocKind } from "../store/store.js";
+import { DOC_KINDS } from "../store/store.js";
+import { BUILTIN_THEMES } from "../themes/builtin.js";
+import type { Workspace } from "./workspace.js";
+
+const require = createRequire(import.meta.url);
+const FONTS: Record<string, string> = {
+  "inter.woff2": "@fontsource-variable/inter/files/inter-latin-wght-normal.woff2",
+  "jetbrains-mono.woff2": "@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2",
+};
+
+/** Reloads the page when the document it shows changes (until M2's WebSocket runtime). */
+const liveReload = (kind: string, id: string) =>
+  `<script>(()=>{try{const es=new EventSource("/api/events");es.onmessage=(e)=>{const c=JSON.parse(e.data);if((c.kind===${JSON.stringify(kind)}&&c.id===${JSON.stringify(id)})||c.kind==="theme")location.reload()}}catch{}})()</script>`;
+
+/**
+ * Local preview server (docs/02-architecture.md). Started lazily on first render, bound to
+ * loopback only, on an OS-assigned port.
+ */
+export class PreviewServer {
+  private server: ServerType | undefined;
+  private starting: Promise<string> | undefined;
+  private url: string | undefined;
+
+  constructor(private readonly ws: Workspace, private readonly port = Number(process.env.FRAMIT_PORT ?? 0)) {}
+
+  get running(): string | undefined {
+    return this.url;
+  }
+
+  ensureStarted(): Promise<string> {
+    this.starting ??= new Promise<string>((resolve, reject) => {
+      const server = serve({ fetch: this.app().fetch, port: this.port, hostname: "127.0.0.1" }, (info: AddressInfo) => {
+        this.url = `http://127.0.0.1:${info.port}`;
+        resolve(this.url);
+      });
+      server.on("error", reject);
+      this.server = server;
+    });
+    return this.starting;
+  }
+
+  async close(): Promise<void> {
+    await new Promise<void>((r) => (this.server ? this.server.close(() => r()) : r()));
+    this.server = undefined;
+    this.starting = undefined;
+    this.url = undefined;
+  }
+
+  app(): Hono {
+    const app = new Hono();
+    const ws = this.ws;
+
+    app.onError((err, c) => {
+      const status = err instanceof FramitError ? (err.code === "NOT_FOUND" || err.code === "THEME_MISSING" ? 404 : 400) : 500;
+      const body = err instanceof FramitError ? err.toJSON() : { code: "INTERNAL", message: err.message };
+      return c.req.path.startsWith("/api/") ? c.json(body, status) : c.html(errorPage(body), status);
+    });
+
+    app.get("/assets/fonts/:name", async (c) => {
+      const pkg = FONTS[c.req.param("name")];
+      if (!pkg) return c.notFound();
+      const data = await readFile(require.resolve(pkg));
+      return c.body(data, 200, { "content-type": "font/woff2", "cache-control": "public, max-age=31536000, immutable" });
+    });
+
+    app.get("/", async (c) => {
+      const screens = await ws.store.list("screen");
+      const themes = [...new Set([...(await ws.store.list("theme")).map((t) => t.id), ...Object.keys(BUILTIN_THEMES)])];
+      const project = await ws.store.getProject();
+      return c.html(indexPage(project.name, screens, themes));
+    });
+
+    app.get("/s/:id", async (c) => {
+      const { screen, theme } = await ws.screen(c.req.param("id"));
+      return c.html(renderScreenPage(screen, theme, { bodyEnd: liveReload("screen", screen.id) }).html);
+    });
+
+    app.get("/s/:id/f/:fid", async (c) => {
+      const { screen, theme } = await ws.screen(c.req.param("id"));
+      const page = renderFramePage(screen, c.req.param("fid"), theme, { bodyEnd: c.req.query("live") ? liveReload("screen", screen.id) : "" });
+      if (!page) throw new FramitError("NOT_FOUND", `Screen "${screen.id}" has no frame "${c.req.param("fid")}".`);
+      return c.html(page.html);
+    });
+
+    app.get("/t/:id", async (c) => {
+      const theme = await ws.theme(c.req.param("id"));
+      const only = c.req.query("components")?.split(",").filter(Boolean);
+      return c.html(renderSwatchPage(theme, { components: only, bodyEnd: c.req.query("live") === "0" ? "" : liveReload("theme", theme.id) }).html);
+    });
+
+    app.get("/api/doc/:kind/:id", async (c) => {
+      const kind = c.req.param("kind") as DocKind;
+      if (!DOC_KINDS.includes(kind)) throw new FramitError("NOT_FOUND", `Unknown kind "${kind}".`);
+      return c.json(await ws.store.read(kind, c.req.param("id")));
+    });
+
+    app.get("/api/render/screen/:id", async (c) => {
+      const { screen, theme } = await ws.screen(c.req.param("id"));
+      const fid = c.req.query("frame");
+      const placed = placeFrames(screen, theme).filter((p) => !fid || p.frame.id === fid);
+      if (!placed.length) throw new FramitError("NOT_FOUND", `Screen "${screen.id}" has no frame "${fid}".`);
+      return c.json(placed.map((p) => ({ frame: p.frame.id, ...renderFrame(p, theme) })));
+    });
+
+    app.get("/api/events", (c) =>
+      streamSSE(c, async (stream) => {
+        const onChange = (e: ChangeEvent) => void stream.writeSSE({ data: JSON.stringify(e) });
+        ws.store.events.on("change", onChange);
+        stream.onAbort(() => void ws.store.events.off("change", onChange));
+        while (!stream.aborted) await stream.sleep(25_000).then(() => stream.writeSSE({ event: "ping", data: "" }));
+      }),
+    );
+
+    return app;
+  }
+}
+
+const PAGE_CSS = `body{margin:0;font:14px/1.5 system-ui,sans-serif;background:#f6f7f9;color:#101828}main{max-width:760px;margin:48px auto;padding:0 20px}h1{font-size:22px;margin:0 0 4px}h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#667085;margin:32px 0 8px}a{color:#4f5bd5;text-decoration:none}ul{list-style:none;padding:0;margin:0;background:#fff;border:1px solid #e4e7ec;border-radius:10px}li{padding:10px 14px;border-top:1px solid #e4e7ec;display:flex;justify-content:space-between}li:first-child{border-top:0}.m{color:#667085;font-size:12px}pre{white-space:pre-wrap;background:#fff;border:1px solid #e4e7ec;border-radius:10px;padding:14px}`;
+
+function indexPage(name: string, screens: Array<{ id: string; name?: string; revision: number }>, themes: string[]) {
+  const items = (xs: string[]) => (xs.length ? `<ul>${xs.join("")}</ul>` : `<p class="m">None yet.</p>`);
+  return `<!doctype html><meta charset="utf-8"><title>${esc(name)} · Framit</title><style>${PAGE_CSS}</style><main><h1>${esc(name)}</h1><div class="m">Framit preview</div><h2>Screens</h2>${items(screens.map((s) => `<li><a href="/s/${esc(s.id)}">${esc(s.name ?? s.id)}</a><span class="m">${esc(s.id)} · rev ${s.revision}</span></li>`))}<h2>Themes</h2>${items(themes.map((t) => `<li><a href="/t/${esc(t)}">${esc(t)}</a></li>`))}</main>`;
+}
+
+function errorPage(e: { code: string; message: string; hint?: string }) {
+  return `<!doctype html><meta charset="utf-8"><title>${esc(e.code)}</title><style>${PAGE_CSS}</style><main><h1>${esc(e.code)}</h1><pre>${esc(e.message)}${e.hint ? `\n\n${esc(e.hint)}` : ""}</pre><p><a href="/">All screens</a></p></main>`;
+}
+

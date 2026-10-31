@@ -3,7 +3,7 @@
 Milestones are sized so each one ends with something a person can open in a browser.
 Issues are tracked in beads (`bd ready` to see what is unblocked).
 
-## M0 · Skeleton
+## M0 · Skeleton ✅
 
 - Repo layout, TypeScript, tsup/esbuild builds, Vitest.
 - MCP server that answers `get_project`, `init_project`, `describe_dsl` with a stub schema.
@@ -12,7 +12,7 @@ Issues are tracked in beads (`bd ready` to see what is unblocked).
 
 **Done when:** Claude Code can register the server and call `init_project`.
 
-## M1 · One beautiful screen
+## M1 · One beautiful screen ✅
 
 - Zod schemas for `theme` and `screen`.
 - Theme compiler → CSS custom properties + component stylesheet.
@@ -25,6 +25,10 @@ Issues are tracked in beads (`bd ready` to see what is unblocked).
 
 **Done when:** from a fresh session, "wireframe a settings page for a SaaS app, desktop and
 phone" produces something you would paste into a doc, without the model seeing this repo.
+
+*Shipped with 30 components* (pulled forward from M5: tabs, textarea, checkbox, toggle, radio-group,
+image, icon, link, stat, progress, breadcrumb, pagination, tabbar, topbar, sidebar, spacer).
+Result: [docs/examples](examples/README.md).
 
 ## M2 · Editable canvas
 

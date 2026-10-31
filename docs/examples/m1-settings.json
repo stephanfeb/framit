@@ -1,0 +1,612 @@
+{
+  "name": "Settings",
+  "description": "Account settings page, desktop and phone",
+  "frames": [
+    {
+      "name": "Desktop",
+      "device": "desktop",
+      "root": {
+        "type": "app-shell",
+        "props": {
+          "maxWidth": 1040
+        },
+        "children": [
+          {
+            "type": "sidebar",
+            "props": {
+              "brand": "Acme",
+              "brandIcon": "hexagon",
+              "footer": "Ada Lovelace · Acme Inc."
+            },
+            "children": [
+              {
+                "type": "nav",
+                "props": {
+                  "items": [
+                    {
+                      "label": "Overview",
+                      "icon": "layout-dashboard"
+                    },
+                    {
+                      "label": "Projects",
+                      "icon": "folder"
+                    },
+                    {
+                      "label": "Customers",
+                      "icon": "users"
+                    },
+                    {
+                      "label": "Reports",
+                      "icon": "chart-column"
+                    },
+                    {
+                      "heading": "Account"
+                    },
+                    {
+                      "label": "Settings",
+                      "icon": "settings",
+                      "active": true
+                    },
+                    {
+                      "label": "Help",
+                      "icon": "circle-help"
+                    }
+                  ]
+                },
+                "id": "n_xk0r"
+              }
+            ],
+            "id": "n_a1b2"
+          },
+          {
+            "type": "topbar",
+            "props": {
+              "search": "Search…"
+            },
+            "children": [
+              {
+                "type": "button",
+                "props": {
+                  "icon": "bell",
+                  "variant": "ghost"
+                },
+                "id": "n_8rg8"
+              },
+              {
+                "type": "avatar",
+                "props": {
+                  "name": "Ada Lovelace",
+                  "size": "sm"
+                },
+                "id": "n_frqy"
+              }
+            ],
+            "id": "n_anh8"
+          },
+          {
+            "type": "stack",
+            "props": {
+              "gap": "xs"
+            },
+            "children": [
+              {
+                "type": "breadcrumb",
+                "props": {
+                  "items": [
+                    "Acme",
+                    "Settings"
+                  ]
+                },
+                "id": "n_fr59"
+              },
+              {
+                "type": "text",
+                "props": {
+                  "role": "h1",
+                  "content": "Settings"
+                },
+                "id": "n_bjty"
+              },
+              {
+                "type": "text",
+                "props": {
+                  "content": "Manage your profile, workspace and preferences.",
+                  "muted": true
+                },
+                "id": "n_2c3t"
+              }
+            ],
+            "id": "n_4tng"
+          },
+          {
+            "type": "tabs",
+            "props": {
+              "items": [
+                "Profile",
+                "Workspace",
+                "Notifications",
+                "Billing",
+                "Security"
+              ],
+              "active": 0
+            },
+            "children": [
+              {
+                "type": "card",
+                "children": [
+                  {
+                    "type": "section",
+                    "props": {
+                      "title": "Profile",
+                      "description": "How you appear to teammates.",
+                      "layout": "aside"
+                    },
+                    "children": [
+                      {
+                        "type": "row",
+                        "props": {
+                          "gap": "md"
+                        },
+                        "children": [
+                          {
+                            "type": "avatar",
+                            "props": {
+                              "name": "Ada Lovelace",
+                              "size": "xl"
+                            },
+                            "id": "n_w985"
+                          },
+                          {
+                            "type": "button",
+                            "props": {
+                              "label": "Upload photo",
+                              "variant": "secondary"
+                            },
+                            "id": "n_rtmt"
+                          },
+                          {
+                            "type": "button",
+                            "props": {
+                              "label": "Remove",
+                              "variant": "ghost"
+                            },
+                            "id": "n_snqv"
+                          }
+                        ],
+                        "id": "n_wbd7"
+                      },
+                      {
+                        "type": "row",
+                        "props": {
+                          "gap": "md",
+                          "align": "start"
+                        },
+                        "children": [
+                          {
+                            "type": "input",
+                            "props": {
+                              "label": "First name",
+                              "value": "Ada"
+                            },
+                            "id": "n_0twf"
+                          },
+                          {
+                            "type": "input",
+                            "props": {
+                              "label": "Last name",
+                              "value": "Lovelace"
+                            },
+                            "id": "n_2j02"
+                          }
+                        ],
+                        "id": "n_bmff"
+                      },
+                      {
+                        "type": "input",
+                        "props": {
+                          "label": "Email",
+                          "type": "email",
+                          "value": "ada@acme.com",
+                          "icon": "mail",
+                          "hint": "Used for sign-in and receipts."
+                        },
+                        "id": "n_wzf8"
+                      }
+                    ],
+                    "id": "n_8tzh"
+                  },
+                  {
+                    "type": "section",
+                    "props": {
+                      "title": "Preferences",
+                      "description": "Language, time and appearance.",
+                      "layout": "aside",
+                      "divider": true
+                    },
+                    "children": [
+                      {
+                        "type": "row",
+                        "props": {
+                          "gap": "md",
+                          "align": "start"
+                        },
+                        "children": [
+                          {
+                            "type": "select",
+                            "props": {
+                              "label": "Language",
+                              "options": [
+                                "English",
+                                "Deutsch",
+                                "Français"
+                              ],
+                              "value": "English"
+                            },
+                            "id": "n_btaa"
+                          },
+                          {
+                            "type": "select",
+                            "props": {
+                              "label": "Time zone",
+                              "options": [
+                                "UTC",
+                                "Europe/London",
+                                "America/New_York"
+                              ],
+                              "value": "UTC"
+                            },
+                            "id": "n_5hx1"
+                          }
+                        ],
+                        "id": "n_6vzq"
+                      },
+                      {
+                        "type": "radio-group",
+                        "props": {
+                          "label": "Theme",
+                          "options": [
+                            "System",
+                            "Light",
+                            "Dark"
+                          ],
+                          "direction": "row"
+                        },
+                        "id": "n_87bm"
+                      }
+                    ],
+                    "id": "n_56rs"
+                  },
+                  {
+                    "type": "section",
+                    "props": {
+                      "title": "Email notifications",
+                      "description": "Choose what we send you.",
+                      "layout": "aside",
+                      "divider": true
+                    },
+                    "children": [
+                      {
+                        "type": "toggle",
+                        "props": {
+                          "label": "Product updates",
+                          "hint": "News and new features.",
+                          "checked": true
+                        },
+                        "id": "n_zaa3"
+                      },
+                      {
+                        "type": "toggle",
+                        "props": {
+                          "label": "Weekly digest",
+                          "hint": "A summary of activity every Monday.",
+                          "checked": true
+                        },
+                        "id": "n_cacg"
+                      },
+                      {
+                        "type": "toggle",
+                        "props": {
+                          "label": "Security alerts",
+                          "hint": "New sign-ins and password changes.",
+                          "checked": true
+                        },
+                        "id": "n_cvh1"
+                      }
+                    ],
+                    "id": "n_e8k8"
+                  },
+                  {
+                    "type": "section",
+                    "props": {
+                      "title": "Danger zone",
+                      "description": "Irreversible actions.",
+                      "layout": "aside",
+                      "divider": true
+                    },
+                    "children": [
+                      {
+                        "type": "row",
+                        "props": {
+                          "justify": "between"
+                        },
+                        "children": [
+                          {
+                            "type": "stack",
+                            "props": {
+                              "gap": "xs"
+                            },
+                            "children": [
+                              {
+                                "type": "text",
+                                "props": {
+                                  "role": "label",
+                                  "content": "Delete account"
+                                },
+                                "id": "n_4why"
+                              },
+                              {
+                                "type": "text",
+                                "props": {
+                                  "role": "caption",
+                                  "muted": true,
+                                  "content": "Permanently remove your account and data."
+                                },
+                                "id": "n_8m8b"
+                              }
+                            ],
+                            "id": "n_694y"
+                          },
+                          {
+                            "type": "button",
+                            "props": {
+                              "label": "Delete account",
+                              "variant": "danger"
+                            },
+                            "id": "n_nhqk"
+                          }
+                        ],
+                        "id": "n_zyrd"
+                      }
+                    ],
+                    "id": "n_c8fk"
+                  },
+                  {
+                    "type": "divider",
+                    "id": "n_bzj2"
+                  },
+                  {
+                    "type": "row",
+                    "props": {
+                      "justify": "end",
+                      "gap": "sm"
+                    },
+                    "children": [
+                      {
+                        "type": "button",
+                        "props": {
+                          "label": "Cancel",
+                          "variant": "ghost"
+                        },
+                        "id": "n_7f7z"
+                      },
+                      {
+                        "type": "button",
+                        "props": {
+                          "label": "Save changes",
+                          "variant": "primary"
+                        },
+                        "id": "n_mpfx"
+                      }
+                    ],
+                    "id": "n_9a5d"
+                  }
+                ],
+                "id": "n_afzm"
+              }
+            ],
+            "id": "n_8tet"
+          }
+        ],
+        "id": "n_pasn"
+      },
+      "id": "f_m3g9"
+    },
+    {
+      "name": "Phone",
+      "device": "phone",
+      "root": {
+        "type": "app-shell",
+        "children": [
+          {
+            "type": "topbar",
+            "props": {
+              "title": "Settings",
+              "center": true
+            },
+            "id": "n_znmp"
+          },
+          {
+            "type": "card",
+            "props": {
+              "padding": "md"
+            },
+            "children": [
+              {
+                "type": "row",
+                "props": {
+                  "gap": "md"
+                },
+                "children": [
+                  {
+                    "type": "avatar",
+                    "props": {
+                      "name": "Ada Lovelace",
+                      "size": "lg",
+                      "caption": "ada@acme.com"
+                    },
+                    "id": "n_sy3n"
+                  },
+                  {
+                    "type": "spacer",
+                    "id": "n_rq25"
+                  },
+                  {
+                    "type": "icon",
+                    "props": {
+                      "name": "chevron-right",
+                      "muted": true
+                    },
+                    "id": "n_h9jh"
+                  }
+                ],
+                "id": "n_fc9e"
+              }
+            ],
+            "id": "n_e54k"
+          },
+          {
+            "type": "text",
+            "props": {
+              "role": "overline",
+              "content": "ACCOUNT",
+              "muted": true
+            },
+            "id": "n_h2k7"
+          },
+          {
+            "type": "list",
+            "props": {
+              "variant": "inset",
+              "items": [
+                {
+                  "title": "Profile",
+                  "leading": {
+                    "icon": "user"
+                  },
+                  "trailing": "chevron"
+                },
+                {
+                  "title": "Workspace",
+                  "subtitle": "Acme Inc.",
+                  "leading": {
+                    "icon": "building-2"
+                  },
+                  "trailing": "chevron"
+                },
+                {
+                  "title": "Billing",
+                  "leading": {
+                    "icon": "credit-card"
+                  },
+                  "trailing": {
+                    "badge": "Pro",
+                    "tone": "accent"
+                  }
+                },
+                {
+                  "title": "Security",
+                  "leading": {
+                    "icon": "shield"
+                  },
+                  "trailing": "chevron"
+                }
+              ]
+            },
+            "id": "n_aa0s"
+          },
+          {
+            "type": "text",
+            "props": {
+              "role": "overline",
+              "content": "PREFERENCES",
+              "muted": true
+            },
+            "id": "n_fj3p"
+          },
+          {
+            "type": "list",
+            "props": {
+              "variant": "inset",
+              "items": [
+                {
+                  "title": "Push notifications",
+                  "leading": {
+                    "icon": "bell"
+                  },
+                  "trailing": "toggle-on"
+                },
+                {
+                  "title": "Weekly digest",
+                  "leading": {
+                    "icon": "mail"
+                  },
+                  "trailing": "toggle-on"
+                },
+                {
+                  "title": "Dark mode",
+                  "leading": {
+                    "icon": "moon"
+                  },
+                  "trailing": "toggle"
+                },
+                {
+                  "title": "Language",
+                  "leading": {
+                    "icon": "globe"
+                  },
+                  "trailing": {
+                    "text": "English"
+                  }
+                }
+              ]
+            },
+            "id": "n_rbv9"
+          },
+          {
+            "type": "button",
+            "props": {
+              "label": "Sign out",
+              "variant": "secondary",
+              "fullWidth": true,
+              "icon": "log-out"
+            },
+            "id": "n_92gz"
+          },
+          {
+            "type": "tabbar",
+            "props": {
+              "items": [
+                {
+                  "label": "Home",
+                  "icon": "house"
+                },
+                {
+                  "label": "Projects",
+                  "icon": "folder"
+                },
+                {
+                  "label": "Alerts",
+                  "icon": "bell",
+                  "badge": 3
+                },
+                {
+                  "label": "Settings",
+                  "icon": "settings",
+                  "active": true
+                }
+              ]
+            },
+            "id": "n_cxg3"
+          }
+        ],
+        "id": "n_hxh2"
+      },
+      "id": "f_gam2"
+    }
+  ],
+  "id": "settings",
+  "theme": "wire-mid-light",
+  "kind": "screen",
+  "revision": 1,
+  "updatedAt": "2026-10-31T10:51:33.675Z"
+}

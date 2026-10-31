@@ -1,95 +1,495 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import { COMPONENTS } from "../components/index.js";
 import { FramitError } from "../errors.js";
-import { DSL_KINDS, GUIDE_STUB, jsonSchemaFor } from "../schema/index.js";
+import { placeFrames, renderScreenPage, type RenderWarning } from "../renderer/render.js";
+import { componentReference, propLines, SCREEN_GUIDE, THEME_GUIDE, TYPE_LEGEND } from "../schema/guide.js";
+import { Screen, validate } from "../schema/screen.js";
+import { ResolvedTheme, deepMerge } from "../schema/theme.js";
+import { slugify } from "../store/ids.js";
+import { walkScreenNodes } from "../store/nodes.js";
+import { applyPatch, PatchOp } from "../store/patch.js";
 import type { Store } from "../store/store.js";
+import { BUILTIN_THEMES } from "../themes/builtin.js";
 import { VERSION } from "../version.js";
+import { PreviewServer } from "./preview.js";
+import { Screenshotter } from "./screenshot.js";
+import { Workspace } from "./workspace.js";
 
-const INSTRUCTIONS = `Framit turns descriptions into editable, themed wireframes stored in .framit/ in the
-current project. Start a session with get_project; if it is not initialised, call init_project.
-Call describe_dsl once per session before writing documents.`;
+const INSTRUCTIONS = `Framit turns descriptions into editable, themed wireframes (desktop and mobile screens) stored in
+.framit/ in the current project, with a local browser preview.
 
-/** Wrap a handler so results become JSON text and FramitErrors become MCP tool errors. */
-function tool<A>(fn: (args: A) => Promise<unknown>) {
+Typical session:
+1. get_project (init_project if not initialised).
+2. describe_dsl once, to learn the screen format and component catalogue.
+3. Pick or create a theme: list_themes / get_theme (read its notes!) / create_theme.
+4. write_screen, then LOOK at the returned screenshots and fix problems with patch_screen.
+5. Give the user the preview URL.
+
+Screens may have been edited by a person in the browser: read_screen before changing an existing screen.`;
+
+type Image = { label: string; png: Buffer };
+type Out = { data: unknown; images?: Image[] };
+
+/** Wrap a handler: JSON text + inline images on success, structured MCP tool error on failure. */
+function tool<A>(fn: (args: A) => Promise<Out>) {
   return async (args: A): Promise<CallToolResult> => {
     try {
-      const value = await fn(args);
-      return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }] };
+      const { data, images = [] } = await fn(args);
+      return {
+        content: [
+          { type: "text", text: JSON.stringify(data, null, 2) },
+          ...images.flatMap((img) => [
+            { type: "text" as const, text: img.label },
+            { type: "image" as const, data: img.png.toString("base64"), mimeType: "image/png" },
+          ]),
+        ],
+      };
     } catch (err) {
-      const payload =
-        err instanceof FramitError
-          ? err.toJSON()
-          : { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) };
+      const payload = err instanceof FramitError ? err.toJSON() : { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) };
       return { isError: true, content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
     }
   };
 }
 
-export function createMcpServer(store: Store): McpServer {
-  const server = new McpServer({ name: "framit", version: VERSION }, { instructions: INSTRUCTIONS });
+const Obj = z.record(z.string(), z.unknown());
 
-  server.registerTool(
+export interface FramitServer {
+  mcp: McpServer;
+  preview: PreviewServer;
+  shots: Screenshotter;
+  close(): Promise<void>;
+}
+
+export function createMcpServer(store: Store, opts: { screenshots?: boolean } = {}): McpServer {
+  return createFramitServer(store, opts).mcp;
+}
+
+export function createFramitServer(store: Store, opts: { screenshots?: boolean } = {}): FramitServer {
+  const ws = new Workspace(store);
+  const preview = new PreviewServer(ws);
+  const shots = new Screenshotter();
+  const screenshotsEnabled = opts.screenshots ?? process.env.FRAMIT_SCREENSHOTS !== "0";
+  const mcp = new McpServer({ name: "framit", version: VERSION }, { instructions: INSTRUCTIONS });
+
+  // ---------- shared helpers ----------
+
+  async function screenResult(id: string, extra: Record<string, unknown>, want: { screenshots: boolean; frames?: string[] }): Promise<Out> {
+    const { doc, screen, theme } = await ws.screen(id);
+    const url = await preview.ensureStarted();
+    const warnings: RenderWarning[] = [...renderScreenPage(screen, theme).warnings];
+    const placed = placeFrames(screen, theme).filter((p) => !want.frames || want.frames.includes(p.frame.id));
+    const images: Image[] = [];
+    if (want.screenshots && screenshotsEnabled) {
+      for (const p of placed) {
+        try {
+          const cap = await shots.capture(`${url}/s/${screen.id}/f/${p.frame.id}`, { width: p.width, height: p.height });
+          images.push({ label: `Frame ${p.frame.id}${p.frame.name ? ` "${p.frame.name}"` : ""} (${typeof p.frame.device === "string" ? p.frame.device : "custom"} ${p.width}×${p.height}):`, png: cap.png });
+          warnings.push(...cap.issues.map((i) => ({ frame: p.frame.id, node: i.node, message: i.message })));
+        } catch (err) {
+          warnings.push({ message: `Screenshot unavailable: ${err instanceof FramitError ? `${err.message} ${err.hint ?? ""}` : (err as Error).message}` });
+          break;
+        }
+      }
+    }
+    return {
+      data: {
+        id: doc.id,
+        revision: doc.revision,
+        updatedAt: doc.updatedAt,
+        theme: theme.id,
+        ...extra,
+        url: `${url}/s/${screen.id}`,
+        frames: placed.map((p) => ({ id: p.frame.id, name: p.frame.name, device: p.frame.device, width: p.width, height: p.height, url: `${url}/s/${screen.id}/f/${p.frame.id}` })),
+        warnings,
+      },
+      images,
+    };
+  }
+
+  async function swatch(themeId: string, components?: string[]): Promise<{ url: string; image?: Image; warning?: string }> {
+    const url = await preview.ensureStarted();
+    const q = components ? `&components=${encodeURIComponent(components.join(","))}` : "";
+    const pageUrl = `${url}/t/${themeId}`;
+    if (!screenshotsEnabled) return { url: pageUrl };
+    try {
+      const cap = await shots.capture(`${pageUrl}?live=0${q}`, { width: 1280, height: 900, scale: components ? 1 : 0.5, maxHeight: 8000 });
+      return { url: pageUrl, image: { label: components ? `Components in theme ${themeId}:` : `Swatch sheet for theme ${themeId} (colours, type scale, every component):`, png: cap.png } };
+    } catch (err) {
+      return { url: pageUrl, warning: `Screenshot unavailable: ${(err as Error).message}` };
+    }
+  }
+
+  function themeSummary(t: ResolvedTheme) {
+    // Notes first: they carry the designer's intent to later sessions.
+    return { id: t.id, name: t.name, notes: t.notes, fidelity: t.fidelity, mode: t.mode, tokens: t.tokens, components: t.components };
+  }
+
+  async function saveTheme(input: Record<string, unknown>, expectedRevision?: number) {
+    const resolved = await ws.resolve(input); // validates, follows extends
+    const { doc, changed } = await store.write("theme", { ...input, kind: "theme" }, { expectedRevision });
+    await ws.writeThemeCss(resolved);
+    return { doc, changed, resolved };
+  }
+
+  // ---------- project ----------
+
+  mcp.registerTool(
     "init_project",
     {
       title: "Initialise Framit project",
-      description:
-        "Create the .framit/ store in the current project so themes, screens, diagrams and flows can be saved. " +
-        "Safe to call repeatedly: an existing project is returned unchanged.",
+      description: "Create the .framit/ store in the current project. Safe to call repeatedly: an existing project is returned unchanged.",
       inputSchema: {
         name: z.string().min(1).optional().describe("Project name. Defaults to the directory name."),
-        theme: z.string().optional().describe('Default theme id for new screens. Defaults to "wire-mid-light".'),
+        theme: z.string().optional().describe('Default theme for new screens: a starter (wire-mid-light, wire-mid-dark, wire-lo) or a theme you will create. Defaults to "wire-mid-light".'),
       },
       annotations: { idempotentHint: true, destructiveHint: false },
     },
     tool(async ({ name, theme }: { name?: string; theme?: string }) => {
       const { project, created } = await store.init({ name, defaultTheme: theme });
-      return { created, root: store.root, store: store.base, project };
+      if (BUILTIN_THEMES[project.defaultTheme]) await ws.themeDoc(project.defaultTheme);
+      return { data: { created, root: store.root, store: store.base, project, next: "Call describe_dsl, then get_theme to read the default theme's notes." } };
     }),
   );
 
-  server.registerTool(
+  mcp.registerTool(
     "get_project",
     {
       title: "Get Framit project",
-      description:
-        "Return project metadata, document counts, and the preview server URL if running. " +
-        "Call this first in a session; if `initialized` is false, call init_project.",
+      description: "Project metadata, document counts, default theme and preview URL. Call first in a session; if `initialized` is false, call init_project.",
       inputSchema: {},
       annotations: { readOnlyHint: true },
     },
     tool(async () => {
-      if (!(await store.isInitialized())) {
-        return { initialized: false, root: store.root, hint: "Call init_project to create .framit/ here." };
+      if (!(await store.isInitialized())) return { data: { initialized: false, root: store.root, hint: "Call init_project to create .framit/ here." } };
+      return { data: { initialized: true, root: store.root, project: await store.getProject(), counts: await store.counts(), previewUrl: preview.running ?? null } };
+    }),
+  );
+
+  // ---------- discovery ----------
+
+  mcp.registerTool(
+    "describe_dsl",
+    {
+      title: "Describe the Framit DSL",
+      description: "The authoring guide and full component reference for screens (and themes). Call once per session before writing screens. Set jsonSchema=true only if you need the formal JSON Schema.",
+      inputSchema: {
+        kind: z.enum(["screen", "theme"]).default("screen"),
+        jsonSchema: z.boolean().default(false).describe("Also return the JSON Schema (large)."),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ kind, jsonSchema }: { kind: "screen" | "theme"; jsonSchema: boolean }): Promise<CallToolResult> => {
+      const text =
+        kind === "theme"
+          ? THEME_GUIDE
+          : `${SCREEN_GUIDE}\n## Component reference\n${TYPE_LEGEND}\n\n${componentReference()}\n`;
+      const content: CallToolResult["content"] = [{ type: "text", text }];
+      if (jsonSchema) {
+        const schema = kind === "theme" ? ResolvedTheme : Screen;
+        content.push({ type: "text", text: JSON.stringify(z.toJSONSchema(schema, { io: "input", unrepresentable: "any" })) });
       }
+      return { content };
+    },
+  );
+
+  mcp.registerTool(
+    "list_components",
+    {
+      title: "List components",
+      description: "Component types with summaries, props and an example node. Filter by category or types. preview=true adds a screenshot of those components rendered in a theme.",
+      inputSchema: {
+        category: z.enum(["layout", "navigation", "content", "form", "data"]).optional(),
+        types: z.array(z.string()).optional().describe("Only these component types."),
+        preview: z.boolean().default(false),
+        theme: z.string().optional().describe("Theme for the preview; defaults to the project default."),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    tool(async ({ category, types, preview: wantPreview, theme }: { category?: string; types?: string[]; preview: boolean; theme?: string }) => {
+      const defs = Object.values(COMPONENTS).filter((d) => (!category || d.category === category) && (!types || types.includes(d.type)));
+      if (types) {
+        const unknown = types.filter((t) => !COMPONENTS[t]);
+        if (unknown.length) throw new FramitError("NOT_FOUND", `Unknown component types: ${unknown.join(", ")}.`, { hint: `Known: ${Object.keys(COMPONENTS).join(", ")}.` });
+      }
+      const data = {
+        legend: TYPE_LEGEND,
+        components: defs.map((d) => {
+          const { width: _w, ...example } = d.example;
+          return { type: d.type, category: d.category, container: d.container, summary: d.summary, props: propLines(d), example: { type: d.type, ...example } };
+        }),
+      };
+      if (!wantPreview) return { data };
+      const sw = await swatch(theme ?? (await ws.defaultThemeId()), defs.map((d) => d.type));
+      return { data: { ...data, previewUrl: sw.url, warning: sw.warning }, images: sw.image ? [sw.image] : [] };
+    }),
+  );
+
+  // ---------- themes ----------
+
+  mcp.registerTool(
+    "list_themes",
+    {
+      title: "List themes",
+      description: "Themes in this project plus starter themes that can be used or copied. Read a theme's notes with get_theme before designing in it.",
+      inputSchema: {},
+      annotations: { readOnlyHint: true },
+    },
+    tool(async () => {
+      const stored = await store.list("theme");
+      const project = await store.getProject();
+      const themes = [];
+      for (const s of stored) {
+        const doc = await store.read("theme", s.id);
+        themes.push({ id: s.id, name: s.name, fidelity: doc.fidelity, mode: doc.mode, extends: doc.extends, revision: s.revision, default: s.id === project.defaultTheme });
+      }
+      const starters = Object.values(BUILTIN_THEMES)
+        .filter((t) => !stored.some((s) => s.id === t.id))
+        .map((t) => ({ id: t.id, name: t.name, fidelity: t.fidelity, mode: t.mode, starter: true, default: t.id === project.defaultTheme }));
+      return { data: { themes: [...themes, ...starters] } };
+    }),
+  );
+
+  mcp.registerTool(
+    "get_theme",
+    {
+      title: "Get theme",
+      description: "A theme's notes (designer intent), tokens and component settings, plus a swatch-sheet screenshot. Call this at the start of any session that will add screens, and follow the notes.",
+      inputSchema: { id: z.string(), swatch: z.boolean().default(true).describe("Include the swatch sheet screenshot.") },
+      annotations: { readOnlyHint: true },
+    },
+    tool(async ({ id, swatch: wantSwatch }: { id: string; swatch: boolean }) => {
+      const doc = await ws.themeDoc(id);
+      const t = await ws.resolve(doc);
+      const sw = wantSwatch ? await swatch(id) : undefined;
+      return { data: { ...themeSummary(t), extends: doc.extends, revision: doc.revision, swatchUrl: sw?.url, warning: sw?.warning }, images: sw?.image ? [sw.image] : [] };
+    }),
+  );
+
+  mcp.registerTool(
+    "create_theme",
+    {
+      title: "Create theme",
+      description:
+        "Create a theme. Easiest: set `from` to a starter (wire-mid-light, wire-mid-dark, wire-lo) or existing theme and pass only what differs in `theme` (e.g. tokens.color, components, notes). " +
+        "Always write `notes`: prose describing the intent (accent usage, density, tone) for future sessions. Returns a swatch sheet; check it. See describe_dsl kind=theme for the fields.",
+      inputSchema: {
+        theme: Obj.describe("Theme document: { id, name, fidelity?, mode?, tokens?, components?, notes, extends? }. Partial when `from` or `extends` is set."),
+        from: z.string().optional().describe("Copy this theme as the starting point (no lasting link, unlike `extends`)."),
+        replace: z.boolean().default(false).describe("Overwrite an existing theme with the same id."),
+      },
+    },
+    tool(async ({ theme, from, replace }: { theme: Record<string, unknown>; from?: string; replace: boolean }) => {
+      const input: Record<string, unknown> = { ...theme };
+      if (!input.id && typeof input.name === "string") input.id = slugify(input.name);
+      if (!replace && typeof input.id === "string" && (await store.list("theme")).some((t) => t.id === input.id)) {
+        throw new FramitError("SCHEMA", `Theme "${String(input.id)}" already exists.`, { hint: "Use update_theme to change it, or pass replace=true." });
+      }
+      let doc = input;
+      if (from) {
+        const base = await ws.theme(from);
+        const { id: _i, name: _n, revision: _r, updatedAt: _u, kind: _k, ...rest } = base as Record<string, unknown>;
+        doc = deepMerge(rest, input);
+      }
+      const saved = await saveTheme(doc);
+      const sw = await swatch(saved.resolved.id);
       return {
-        initialized: true,
-        root: store.root,
-        project: await store.getProject(),
-        counts: await store.counts(),
-        previewUrl: null, // preview server arrives in M1 (framit-1fa.6)
+        data: { ...themeSummary(saved.resolved), revision: saved.doc.revision, css: `.framit/themes/${saved.resolved.id}.css`, swatchUrl: sw.url, warning: sw.warning },
+        images: sw.image ? [sw.image] : [],
       };
     }),
   );
 
-  server.registerTool(
-    "describe_dsl",
+  mcp.registerTool(
+    "update_theme",
     {
-      title: "Describe the Framit DSL",
-      description:
-        "Return the JSON Schema and authoring guide for Framit documents. Call once per session before " +
-        "writing any screen, theme, diagram or flow. Pass `kind` to get one schema; omit it for all.",
+      title: "Update theme",
+      description: "Change a theme with a deep `merge` (e.g. {tokens:{color:{accent:\"#e5484d\"}}}) or JSON Patch `ops`. Every screen using it changes too. Update `notes` when the intent changes.",
       inputSchema: {
-        kind: z.enum(DSL_KINDS).optional().describe("Document kind to describe."),
+        id: z.string(),
+        merge: Obj.optional(),
+        ops: z.array(PatchOp).optional().describe("RFC 6902 ops on the stored theme document."),
+        expectedRevision: z.number().int().optional(),
       },
-      annotations: { readOnlyHint: true },
     },
-    tool(async ({ kind }: { kind?: (typeof DSL_KINDS)[number] }) => {
-      const kinds = kind ? [kind] : DSL_KINDS;
-      const schemas = Object.fromEntries(kinds.map((k) => [k, jsonSchemaFor(k) ?? "not yet available"]));
-      return { status: "stub", version: VERSION, guide: GUIDE_STUB, schemas };
+    tool(async ({ id, merge, ops, expectedRevision }: { id: string; merge?: Record<string, unknown>; ops?: PatchOp[]; expectedRevision?: number }) => {
+      if (!merge && !ops) throw new FramitError("SCHEMA", "Pass `merge` or `ops`.");
+      const current = await ws.themeDoc(id);
+      if (expectedRevision !== undefined && current.revision !== expectedRevision) {
+        throw new FramitError("REVISION", `Theme "${id}" is at revision ${current.revision}, not ${expectedRevision}.`, { data: { current } });
+      }
+      let next: Record<string, unknown> = current;
+      if (merge) next = deepMerge(next, { ...merge, id });
+      if (ops) next = applyPatch(next, ops);
+      const saved = await saveTheme(next, current.revision);
+      const sw = await swatch(id);
+      return { data: { ...themeSummary(saved.resolved), revision: saved.doc.revision, changed: saved.changed, swatchUrl: sw.url, warning: sw.warning }, images: sw.image ? [sw.image] : [] };
     }),
   );
 
-  return server;
+  mcp.registerTool(
+    "delete_theme",
+    {
+      title: "Delete theme",
+      description: "Delete a theme. Refuses while screens use it unless force=true.",
+      inputSchema: { id: z.string(), force: z.boolean().default(false) },
+      annotations: { destructiveHint: true },
+    },
+    tool(async ({ id, force }: { id: string; force: boolean }) => {
+      const users: string[] = [];
+      for (const s of await store.list("screen")) if ((await store.read("screen", s.id)).theme === id) users.push(s.id);
+      if (users.length && !force) throw new FramitError("SCHEMA", `Theme "${id}" is used by: ${users.join(", ")}.`, { hint: "Switch those screens to another theme, or pass force=true." });
+      await store.delete("theme", id);
+      return { data: { deleted: id, orphanedScreens: users } };
+    }),
+  );
+
+  // ---------- screens ----------
+
+  mcp.registerTool(
+    "write_screen",
+    {
+      title: "Write screen",
+      description:
+        "Create or replace a screen. Frames are device viewports; everything inside a frame is flow layout (stack, row, grid…), never coordinates. Prefer theme tokens over raw CSS values. " +
+        "If the screen already exists and you did not write it this turn, call read_screen first and pass expectedRevision, because a person may have edited it in the browser. " +
+        "Returns a screenshot of every frame: look at them and fix problems before reporting success. Call describe_dsl first if you have not this session.",
+      inputSchema: {
+        screen: Obj.describe("Screen document: { id?, name, theme?, description?, frames: [{ name?, device, root }] }. id defaults to a slug of name."),
+        expectedRevision: z.number().int().optional().describe("Fail if the stored revision differs (0 = must not exist)."),
+        screenshots: z.boolean().default(true),
+      },
+    },
+    tool(async ({ screen, expectedRevision, screenshots }: { screen: Record<string, unknown>; expectedRevision?: number; screenshots: boolean }) => {
+      const input: Record<string, unknown> = { ...screen };
+      if (!input.id && typeof input.name === "string") input.id = slugify(input.name);
+      input.theme ??= await ws.defaultThemeId();
+      validate(Screen, input, "screen");
+      await ws.theme(String(input.theme));
+      const { doc, changed } = await store.write("screen", input, { expectedRevision });
+      return screenResult(doc.id, { changed }, { screenshots });
+    }),
+  );
+
+  mcp.registerTool(
+    "patch_screen",
+    {
+      title: "Patch screen",
+      description:
+        "Change part of a screen with node-addressed JSON Patch, leaving everything else (including a person's browser edits) intact. Preferred over write_screen for fixes. " +
+        'Each op: { op: add|remove|replace|move|copy|test, node?: id, path?: "/props/label", value?, fromNode?, from? }. With `node`, path is relative to that node; ' +
+        '{op:"remove", node:"n_x"} deletes a node; {op:"add", node:"n_parent", path:"/children/-", value:{…}} appends; {op:"move", fromNode:"n_x", node:"n_parent", path:"/children/0"} moves. Returns screenshots of the frames.',
+      inputSchema: {
+        id: z.string(),
+        ops: z.array(PatchOp).min(1),
+        expectedRevision: z.number().int().optional(),
+        screenshots: z.boolean().default(true),
+      },
+    },
+    tool(async ({ id, ops, expectedRevision, screenshots }: { id: string; ops: PatchOp[]; expectedRevision?: number; screenshots: boolean }) => {
+      const current = await store.read("screen", id);
+      if (expectedRevision !== undefined && current.revision !== expectedRevision) {
+        throw new FramitError("REVISION", `Screen "${id}" is at revision ${current.revision}, not ${expectedRevision}.`, { hint: "Re-read it and reapply your change.", data: { current } });
+      }
+      const next = applyPatch(current, ops);
+      validate(Screen, next, "patched screen");
+      if (typeof next.theme === "string") await ws.theme(next.theme);
+      const { changed } = await store.write("screen", next, { expectedRevision: current.revision });
+      return screenResult(id, { changed }, { screenshots });
+    }),
+  );
+
+  mcp.registerTool(
+    "read_screen",
+    {
+      title: "Read screen",
+      description: "The current screen document, including edits made in the browser, with its revision and preview URL. Call before modifying a screen you did not just write.",
+      inputSchema: { id: z.string(), screenshots: z.boolean().default(false) },
+      annotations: { readOnlyHint: true },
+    },
+    tool(async ({ id, screenshots }: { id: string; screenshots: boolean }) => {
+      const doc = await store.read("screen", id);
+      const r = await screenResult(id, {}, { screenshots });
+      return { data: { document: doc, url: (r.data as { url: string }).url, warnings: (r.data as { warnings: unknown }).warnings }, images: r.images };
+    }),
+  );
+
+  mcp.registerTool(
+    "list_screens",
+    {
+      title: "List screens",
+      description: "All screens with theme, frames and revision.",
+      inputSchema: { theme: z.string().optional() },
+      annotations: { readOnlyHint: true },
+    },
+    tool(async ({ theme }: { theme?: string }) => {
+      const out = [];
+      for (const s of await store.list("screen")) {
+        const d = await store.read("screen", s.id);
+        if (theme && d.theme !== theme) continue;
+        const frames = Array.isArray(d.frames) ? (d.frames as Array<{ id?: string; name?: string; device?: unknown }>).map((f) => ({ id: f.id, name: f.name, device: f.device })) : [];
+        out.push({ id: s.id, name: s.name, description: d.description, theme: d.theme, frames, revision: s.revision, updatedAt: s.updatedAt });
+      }
+      return { data: { screens: out, previewUrl: preview.running ?? null } };
+    }),
+  );
+
+  mcp.registerTool(
+    "delete_screen",
+    {
+      title: "Delete screen",
+      description: "Delete a screen document.",
+      inputSchema: { id: z.string() },
+      annotations: { destructiveHint: true },
+    },
+    tool(async ({ id }: { id: string }) => {
+      await store.delete("screen", id);
+      return { data: { deleted: id } };
+    }),
+  );
+
+  mcp.registerTool(
+    "duplicate_screen",
+    {
+      title: "Duplicate screen",
+      description: "Copy a screen under a new id with fresh node ids. Useful for variants (empty state, error state) of an existing screen.",
+      inputSchema: { id: z.string(), newId: z.string(), name: z.string().optional(), screenshots: z.boolean().default(false) },
+    },
+    tool(async ({ id, newId, name, screenshots }: { id: string; newId: string; name?: string; screenshots: boolean }) => {
+      const src = structuredClone(await store.read("screen", id));
+      for (const f of (src.frames as Array<Record<string, unknown>>) ?? []) delete f.id;
+      walkScreenNodes(src, (n) => void delete n.id);
+      const { revision: _r, updatedAt: _u, ...rest } = src;
+      await store.write("screen", { ...rest, id: newId, name: name ?? `${String(src.name)} (copy)` }, { expectedRevision: 0 });
+      return screenResult(newId, { duplicatedFrom: id }, { screenshots });
+    }),
+  );
+
+  mcp.registerTool(
+    "render",
+    {
+      title: "Render",
+      description: "Preview URL plus fresh screenshots of a screen (optionally one frame) or a theme's swatch sheet. Use to show the user or to re-check after browser edits.",
+      inputSchema: { kind: z.enum(["screen", "theme"]).default("screen"), id: z.string(), frame: z.string().optional() },
+      annotations: { readOnlyHint: true },
+    },
+    tool(async ({ kind, id, frame }: { kind: "screen" | "theme"; id: string; frame?: string }) => {
+      if (kind === "theme") {
+        await ws.themeDoc(id);
+        const sw = await swatch(id);
+        return { data: { url: sw.url, warning: sw.warning }, images: sw.image ? [sw.image] : [] };
+      }
+      return screenResult(id, {}, { screenshots: true, frames: frame ? [frame] : undefined });
+    }),
+  );
+
+  return {
+    mcp,
+    preview,
+    shots,
+    async close() {
+      await Promise.allSettled([preview.close(), shots.close()]);
+    },
+  };
 }

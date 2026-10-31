@@ -1,6 +1,6 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import path from "node:path";
-import { createMcpServer } from "./server/mcp.js";
+import { createFramitServer } from "./server/mcp.js";
 import { Store } from "./store/store.js";
 import { VERSION } from "./version.js";
 
@@ -37,8 +37,20 @@ async function main() {
   if (command !== "serve") throw new Error(`Unknown command "${command}".\n\n${USAGE}`);
 
   const store = new Store(path.resolve(root ?? process.env.FRAMIT_ROOT ?? process.cwd()), VERSION);
-  const server = createMcpServer(store);
-  await server.connect(new StdioServerTransport());
+  const framit = createFramitServer(store);
+  const transport = new StdioServerTransport();
+  let closing = false;
+  const shutdown = async () => {
+    if (closing) return;
+    closing = true;
+    await framit.close();
+    process.exit(0);
+  };
+  transport.onclose = () => void shutdown();
+  process.stdin.on("close", () => void shutdown());
+  process.on("SIGINT", () => void shutdown());
+  process.on("SIGTERM", () => void shutdown());
+  await framit.mcp.connect(transport);
   // stdout carries the protocol; everything human-readable goes to stderr.
   console.error(`[framit] ${VERSION} serving ${store.root}`);
 }

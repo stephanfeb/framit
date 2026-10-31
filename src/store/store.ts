@@ -1,5 +1,6 @@
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
+import { EventEmitter } from "node:events";
 import path from "node:path";
 import { FramitError } from "../errors.js";
 import { isValidDocId } from "./ids.js";
@@ -53,12 +54,21 @@ export interface DocSummary {
  * inside this process so the MCP server and the preview server cannot interleave a
  * read-modify-write.
  */
+export interface ChangeEvent {
+  kind: DocKind;
+  id: string;
+  revision: number | null; // null when deleted
+}
+
 export class Store {
+  /** Emits "change" (ChangeEvent) after every successful write or delete. */
+  readonly events = new EventEmitter();
   readonly root: string;
   readonly base: string;
   private readonly locks = new Map<string, Promise<unknown>>();
 
   constructor(root: string, private readonly version = "0.0.1") {
+    this.events.setMaxListeners(100);
     this.root = path.resolve(root);
     this.base = path.join(this.root, STORE_DIRNAME);
   }
@@ -121,7 +131,7 @@ export class Store {
         // A corrupt or half-edited file should not break listing; skip it.
       }
     }
-    return out;
+    return out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   }
 
   /**
@@ -171,6 +181,7 @@ export class Store {
         updatedAt: new Date().toISOString(),
       };
       await atomicWriteJson(file, doc);
+      this.events.emit("change", { kind, id, revision: doc.revision } satisfies ChangeEvent);
       return { doc, changed: true };
     });
   }
@@ -178,6 +189,7 @@ export class Store {
   async delete(kind: DocKind, id: string): Promise<void> {
     await this.read(kind, id); // throws NOT_FOUND with suggestions
     await this.withLock(`${kind}/${id}`, () => rm(this.docFile(kind, id)));
+    this.events.emit("change", { kind, id, revision: null } satisfies ChangeEvent);
   }
 
   async counts(): Promise<Record<DocKind, number>> {

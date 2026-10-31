@@ -125,3 +125,31 @@ bd prime                # Refresh Beads context
 
 **Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/core-concepts/sync-concepts.md for details and anti-patterns.
 <!-- END BEADS CODEX SETUP -->
+
+## Build & Test
+
+```bash
+npm install
+npm run build      # dist/cli.js (server) + dist/runtime/editor.js (browser runtime)
+npm test           # vitest; test/screenshot.test.ts needs Chromium or Chrome
+npm run typecheck
+```
+
+## Architecture Overview
+
+Local MCP server that renders wireframes as HTML. Design docs live in `docs/` (start with
+`docs/02-architecture.md` and the ADRs in `docs/06-decisions.md`).
+
+- `src/components/` is the single component registry: each component has its Zod props schema,
+  example and render function. Schema, renderer, `describe_dsl` and the swatch sheet derive from it.
+- `src/schema/` holds screen/theme schemas, tokens and the generated authoring guide.
+- `src/renderer/` is pure `(document, theme) -> HTML`; `base-css.ts` reads only `--fx-*` variables
+  from the compiled theme.
+- `src/store/` is the `.framit/` document store (atomic writes, revisions, node-ID JSON Patch).
+- `src/server/` wires the MCP tools, the Hono preview server and the Playwright screenshotter.
+
+## Conventions & Patterns
+
+- Everything inside a frame is flow layout; never add positioning to the style whitelist (ADR-002).
+- Adding a component = one `defineComponent` in `src/components/`, with an example. Nothing else.
+- Pin new dependencies to versions at least two weeks old.
