@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "framit",
+  "project_id": "d72f6c55-b131-4a68-947b-c84d6f26e1bf"
+}
