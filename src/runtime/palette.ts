@@ -18,10 +18,12 @@ export function openPalette(ed: Editor) {
     close();
     ed.insert(c.type);
   };
+  // Hover follows real pointer movement only: rows redrawn under a still pointer must not steal the
+  // keyboard choice (mouseenter fires when a row appears under the cursor).
   const draw = () => {
     list.replaceChildren(
       ...shown.map((c, i) =>
-        h("li", { class: i === active ? "is-active" : undefined, onpointerdown: (e: Event) => (e.preventDefault(), choose(i)), onmouseenter: () => ((active = i), draw()) }, h("b", {}, c.type), h("span", {}, `${c.category} · ${c.summary}`)),
+        h("li", { class: i === active ? "is-active" : undefined, onpointerdown: (e: Event) => (e.preventDefault(), choose(i)), onpointermove: () => active !== i && ((active = i), draw()) }, h("b", {}, c.type), h("span", {}, `${c.category} · ${c.summary}`)),
       ),
     );
     list.children[active]?.scrollIntoView({ block: "nearest" });

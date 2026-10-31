@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createFramitServer, type FramitServer } from "../src/server/mcp.js";
 import { Store } from "../src/store/store.js";
+import { VERSION } from "../src/version.js";
 
 let root: string;
 let client: Client;
@@ -56,14 +57,14 @@ const settings = {
 };
 
 describe("framit MCP server", () => {
-  it("advertises the M1–M3 tools", async () => {
+  it("advertises the tools", async () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(
       [
         "create_theme", "delete_screen", "delete_theme", "describe_dsl", "duplicate_screen", "get_project", "get_theme", "init_project",
         "list_components", "list_screens", "list_themes", "patch_screen", "read_screen", "render", "update_theme", "write_screen",
         "write_flow", "patch_flow", "read_flow", "list_flows", "delete_flow", "export",
-        "write_diagram", "patch_diagram", "read_diagram", "list_diagrams", "delete_diagram",
+        "write_diagram", "patch_diagram", "read_diagram", "list_diagrams", "delete_diagram", "lint",
       ].sort(),
     );
     expect(client.getInstructions()).toContain("describe_dsl");
@@ -73,9 +74,67 @@ describe("framit MCP server", () => {
     expect((await call("get_project")).body.initialized).toBe(false);
     const init = await call("init_project", { name: "Demo" });
     expect(init.body.created).toBe(true);
+    // First run: the model is told where documents live, the preview URL and the screenshot status.
+    expect(init.body.previewUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(init.body.tell).toContain(init.body.previewUrl);
+    expect(init.body.screenshots).toMatch(/^(on, using|unavailable)/);
     await stat(path.join(root, ".framit", "themes", "wire-mid-light.json"));
     expect(await readFile(path.join(root, ".framit", "themes", "wire-mid-light.css"), "utf8")).toContain("--fx-color-accent: #4f5bd5");
-    expect((await call("init_project", { name: "Other" })).body).toMatchObject({ created: false, project: { name: "Demo" } });
+    const again = (await call("init_project", { name: "Other" })).body;
+    expect(again).toMatchObject({ created: false, project: { name: "Demo" } });
+    expect(again.tell).toBeUndefined();
+  });
+
+  it("lints the project without screenshots", async () => {
+    await call("init_project");
+    await call("write_screen", { screen: { id: "a", name: "A", frames: [{ device: "phone", root: { type: "stack", children: [{ type: "input", props: { placeholder: "Email" } }] } }] }, screenshots: false });
+    const w = await call("write_screen", { screen: { id: "b", name: "B", frames: [{ device: "phone", root: { type: "text", props: { content: "ok" }, style: { color: "#123456" } } }] }, screenshots: false });
+    expect(w.body.warnings).toContainEqual(expect.objectContaining({ rule: "raw-colour" }));
+    const all = (await call("lint")).body;
+    expect(all.checked).toBe(2);
+    expect(all.ok).toBe(false);
+    expect(all.issues.map((i: any) => `${i.id}:${i.rule}`).sort()).toEqual(["a:unlabelled-field", "b:raw-colour"]);
+    expect((await call("lint", { kind: "screen", id: "a" })).body.issues).toHaveLength(1);
+    expect((await call("lint", { id: "a" })).isError).toBe(true);
+  });
+
+  it("keeps comments through rewrites and lets the model resolve them", async () => {
+    await call("init_project");
+    const screen = { id: "c", name: "C", frames: [{ id: "f", device: "phone", root: { id: "n_t", type: "text", props: { content: "Hi" } } }] };
+    await call("write_screen", { screen: { ...screen, comments: [{ node: "n_t", text: "Say hello properly" }] }, screenshots: false });
+    const p = (await call("get_project")).body;
+    expect(p.openComments).toEqual([{ screen: "c", comments: 1 }]);
+    const cid = (await call("read_screen", { id: "c" })).body.document.comments[0].id;
+    expect(cid).toMatch(/^c_/);
+    // A rewrite that omits comments keeps them.
+    await call("write_screen", { screen: { ...screen, frames: [{ ...screen.frames[0], root: { id: "n_t", type: "text", props: { content: "Hello there" } } }] }, screenshots: false });
+    expect((await call("read_screen", { id: "c" })).body.document.comments).toHaveLength(1);
+    const r = await call("patch_screen", { id: "c", screenshots: false, ops: [{ op: "add", node: cid, path: "/resolved", value: true }, { op: "add", node: cid, path: "/replies", value: [{ author: "claude", text: "Done" }] }] });
+    expect(r.isError).toBe(false);
+    expect((await call("get_project")).body.openComments).toBeUndefined();
+    expect((await call("list_screens")).body.screens[0].openComments).toBeUndefined();
+    const bad = await call("write_screen", { screen: { ...screen, comments: [{ node: "n_t" }] }, screenshots: false });
+    expect(bad.isError).toBe(true);
+  });
+
+  it("offers new-theme, wireframe and address-comments prompts", async () => {
+    const { prompts } = await client.listPrompts();
+    expect(prompts.map((p) => p.name).sort()).toEqual(["address-comments", "new-theme", "wireframe"]);
+    const w = await client.getPrompt({ name: "wireframe", arguments: { product: "A habit tracker", screens: "today, stats" } });
+    const text = (w.messages[0]!.content as { text: string }).text;
+    expect(text).toContain("these screens: today, stats");
+    expect(text).toContain("lint");
+    expect(text).not.toContain("Propose the list of screens");
+    const t = await client.getPrompt({ name: "new-theme", arguments: { mode: "dark", accent: "teal" } });
+    const tt = (t.messages[0]!.content as { text: string }).text;
+    expect(tt).toContain("- mode: dark");
+    expect(tt).toMatch(/missing \(product, fidelity, density, reference\)/);
+    expect((await client.getPrompt({ name: "address-comments", arguments: {} })).messages).toHaveLength(1);
+  });
+
+  it("reports the same version as package.json", async () => {
+    const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+    expect(VERSION).toBe(pkg.version);
   });
 
   it("describes the DSL with the component reference", async () => {

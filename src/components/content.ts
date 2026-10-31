@@ -206,3 +206,37 @@ export const progress = defineComponent({
     return `<div ${ctx.attrs(n, "fx-progress")}>${head}<div class="fx-progress-track"><div class="fx-progress-bar fx-bg-${p.tone}" style="width:${p.value}%"></div></div>${p.caption ? `<div class="fx-caption fx-muted">${ctx.edit("/caption", p.caption)}</div>` : ""}</div>`;
   },
 });
+
+export const code = defineComponent({
+  type: "code",
+  category: "content",
+  summary: "Code block in the mono font, with an optional filename or language label and line numbers.",
+  container: false,
+  props: z
+    .object({
+      content: z.string().describe("The code; newlines are kept."),
+      title: z.string().optional().describe('Filename or language, e.g. "install.sh".'),
+      lineNumbers: z.boolean().default(false),
+      copy: z.boolean().default(false).describe("Show a copy icon in the header."),
+    })
+    .strict(),
+  example: { width: 420, props: { title: "Terminal", content: "npm install framit\nnpx framit doctor", copy: true } },
+  render: (n, ctx) => {
+    const p = n.props;
+    const head = p.title || p.copy ? `<div class="fx-code-head"><span>${p.title ? ctx.edit("/title", p.title) : ""}</span>${p.copy ? ctx.icon("copy", 14) : ""}</div>` : "";
+    const lines = p.lineNumbers ? `<span class="fx-code-gutter" aria-hidden="true">${p.content.split("\n").map((_, i) => i + 1).join("\n")}</span>` : "";
+    return `<div ${ctx.attrs(n, "fx-code")}>${head}<pre class="fx-code-pre">${lines}<code>${ctx.edit("/content", p.content)}</code></pre></div>`;
+  },
+});
+
+export const kbd = defineComponent({
+  type: "kbd",
+  category: "content",
+  summary: 'Keyboard shortcut keycaps, e.g. keys ["⌘", "K"]. Inline in rows and menus.',
+  container: false,
+  props: z.object({ keys: z.array(z.string()).min(1), separator: z.string().optional().describe('Shown between keys, e.g. "+" or "then".') }).strict(),
+  example: { props: { keys: ["⌘", "K"] } },
+  variants: [{ keys: ["Ctrl", "Shift", "P"], separator: "+" }, { keys: ["Esc"] }],
+  render: (n, ctx) =>
+    `<span ${ctx.attrs(n, "fx-kbd-group")}>${n.props.keys.map((k, i) => `${i && n.props.separator ? `<span class="fx-kbd-sep">${esc(n.props.separator)}</span>` : ""}<kbd class="fx-kbd">${ctx.edit(`/keys/${i}`, k)}</kbd>`).join("")}</span>`,
+});

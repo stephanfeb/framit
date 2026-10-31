@@ -111,6 +111,14 @@ told to prefer tokens.
 | `pagination` | `page`, `pages` |
 | `raw` | `html` escape hatch; rendered sanitised; not structurally editable (ADR-005) |
 
+*Built (M5):* `modal`, `drawer`, `toast`, `alert`, `empty-state`, `chart`, `code` and `kbd`. That makes
+41 components; `scroll` and `raw` remain unbuilt. Overlays (`modal`, `drawer`, `toast`) are frame-level:
+the frame is their containing block (`contain: layout`) and they fill its first viewport (`--fx-vh`),
+wherever they sit in the tree. That is the component-prop route ADR-002 anticipates, so authors never
+position anything. `chart` draws line, area, bar, donut and sparkline from `series`, or a muted sketch
+without them. `actions` on alert, empty-state, modal and drawer are editable buttons, and their `to`
+props are prototype hotspots.
+
 The catalogue will grow. Adding a component means: a Zod schema, a render function, default
 styles keyed to theme tokens, and an entry in `list_components`.
 
@@ -126,6 +134,16 @@ not a bug. `image` and `chart` without data render as sketches.
 `margin`, `gap`, `background`, `color`, `borderRadius`, `textAlign`) with token values
 preferred. It exists so a model can nudge one element without a new component. Anything
 beyond the whitelist is rejected by the schema with a message pointing at the right component.
+
+### Comments
+
+`comments: [{ id, node, text, author, createdAt?, resolved?, replies?: [{ author, text, createdAt? }] }]`
+on a screen are review notes. Each is pinned to a node or frame id; there are no coordinates (ADR-002).
+- **Ids:** `c_…`, assigned on write and unique alongside node ids, so patches can address a comment
+  by id.
+- **Authors:** `author` is `"you"` for people in the editor and `"claude"` for the model.
+- **Rewrites:** `write_screen` keeps the existing comments when the new document omits `comments`.
+- **Rendering:** comments are never rendered.
 
 ## Themes
 

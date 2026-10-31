@@ -1,9 +1,9 @@
-import { COMPONENTS, type AnyNode } from "../components/index.js";
+import { CATEGORIES, COMPONENTS, type AnyNode } from "../components/index.js";
 import { TYPE_ROLES, type ResolvedTheme } from "../schema/theme.js";
 import { esc } from "./html.js";
 import { createCtx, pageHead, type PageOptions, type RenderWarning } from "./render.js";
 
-const CATEGORY_ORDER = ["layout", "navigation", "content", "form", "data"] as const;
+const CATEGORY_ORDER = CATEGORIES;
 const WIDTH = 1280;
 
 const SWATCH_CSS = String.raw`
@@ -20,6 +20,9 @@ const SWATCH_CSS = String.raw`
 .fx-sw-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .fx-sw-cell { display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px dashed var(--fx-color-border); border-radius: var(--fx-radius-md); min-width: 0; }
 .fx-sw-cell--wide { grid-column: span 2; }
+/* Overlays (modal, drawer, toast) preview inside their own cell. */
+.fx-sw-cell { contain: layout; position: relative; overflow: hidden; }
+.fx-sw-cell:has(.fx-overlay) { --fx-vh: 100%; min-height: 300px; }
 .fx-sw-cell--full { grid-column: 1 / -1; }
 .fx-sw-name { font-family: var(--fx-font-mono); font-size: 11px; color: var(--fx-color-muted); }
 .fx-sw-variants { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }

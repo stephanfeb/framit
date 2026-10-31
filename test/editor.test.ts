@@ -289,3 +289,50 @@ describe("M2 acceptance", () => {
     expect(read.revision).toBe(5);
   });
 });
+
+describe("comments", () => {
+  it("pins a comment to the clicked element, resolves it and undoes", async () => {
+    await page.keyboard.press("c");
+    await expect.poll(() => page.evaluate(() => document.body.dataset.mode)).toBe("comment");
+    await node("n_save").click();
+    await page.waitForSelector(".fx-cm-composer textarea");
+    // Clicking a frame control in comment mode places a comment; it must not trigger the control.
+    await page.keyboard.type("Make this say Save changes");
+    await page.keyboard.press("Enter");
+    await saved();
+    let c = (await doc()).comments;
+    expect(c).toEqual([expect.objectContaining({ node: "n_save", text: "Make this say Save changes", author: "you", id: expect.stringMatching(/^c_/) })]);
+    await expect.poll(() => page.locator(".fx-pin").count()).toBe(1);
+    await expect.poll(() => page.locator(".fx-cm-item .fx-cm-on").first().textContent()).toContain("button “Save”");
+    expect(await page.locator("[data-mode-btn='comment'] .fx-cm-count").textContent()).toBe("1");
+
+    await page.locator(".fx-cm-item [data-act='resolve']").click();
+    await saved();
+    await expect.poll(async () => (await doc()).comments[0].resolved).toBe(true);
+    await expect.poll(() => page.locator(".fx-pin").count()).toBe(0);
+
+    await page.keyboard.press("Meta+z");
+    await saved();
+    await expect.poll(async () => (await doc()).comments[0].resolved).toBeFalsy();
+    await expect.poll(() => page.locator(".fx-pin").count()).toBe(1);
+  });
+
+  it("shows the model's reply and resolution live, and survives a rewrite without comments", async () => {
+    await page.keyboard.press("c");
+    await node("n_title").click();
+    await page.keyboard.type("Too generic");
+    await page.keyboard.press("Enter");
+    await saved();
+    const d = await doc();
+    const id = d.comments[0].id;
+    // The model's side: what patch_screen would write.
+    d.comments[0].resolved = true;
+    d.comments[0].replies = [{ author: "claude", text: "Renamed to Account settings." }];
+    await store.write("screen", d, { source: "mcp" });
+    await page.locator(".fx-cm-toggle input").check();
+    await expect.poll(() => page.locator(`[data-comment="${id}"]`).textContent()).toContain("Claude Renamed to Account settings.");
+    await expect.poll(() => page.locator(`[data-comment="${id}"].is-resolved`).count()).toBe(1);
+    // Comments live in the document but never in the rendered frames.
+    expect(await page.locator(".fx-frame").first().innerHTML()).not.toContain("Too generic");
+  });
+});

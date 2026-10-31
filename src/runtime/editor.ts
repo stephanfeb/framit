@@ -2,6 +2,7 @@
 
 import { applyOps, invertOps, type Op } from "../shared/patch-core.js";
 import { Api } from "./api.js";
+import { Comments } from "./comments.js";
 import { cssEscape, h } from "./dom.js";
 import { Inspector } from "./inspector.js";
 import { frameOf, getPointer, isContainer, isDescendant, locate, newId, withFreshIds, type Meta, type Node, type ScreenDoc } from "./model.js";
@@ -13,6 +14,7 @@ import { Viewport } from "./viewport.js";
 export const FRAMIT_RUNTIME_VERSION = "0.1.0";
 
 type RenderMode = "none" | "frame" | "canvas";
+type Mode = "design" | "preview" | "comment";
 interface HistoryEntry {
   ops: Op[];
   inverse: Op[];
@@ -33,7 +35,7 @@ export class Editor {
   revision: number;
   selection: string[] = [];
   hover: string | undefined;
-  mode: "design" | "preview" = "design";
+  mode: Mode = "design";
   editing: Editing | undefined;
   dragging = false;
   paletteOpen = false;
@@ -42,6 +44,7 @@ export class Editor {
   readonly viewport: Viewport;
   readonly overlay: Overlay;
   readonly inspector: Inspector;
+  readonly comments: Comments;
   readonly canvas: HTMLElement;
   private undoStack: HistoryEntry[] = [];
   private redoStack: HistoryEntry[] = [];
@@ -59,8 +62,10 @@ export class Editor {
     this.viewport = new Viewport(document.getElementById("fx-viewport")!, this.canvas, `fx-view:${boot.id}`);
     this.overlay = new Overlay(this, document.getElementById("fx-overlay")!);
     this.inspector = new Inspector(this, document.getElementById("fx-inspector")!);
+    this.comments = new Comments(this, document.getElementById("fx-pins")!, document.getElementById("fx-comments")!);
     this.viewport.onChange = () => {
       this.overlay.schedule();
+      this.comments.schedule(false);
       document.getElementById("fx-zoom")!.textContent = `${Math.round(this.viewport.view.z * 100)}%`;
     };
     this.viewport.onChange();
@@ -73,6 +78,7 @@ export class Editor {
     this.bindPointer();
     this.bindKeys();
     this.bindBar();
+    this.comments.schedule();
     this.api.events((e) => this.onRemoteChange(e));
     (window as unknown as { framit: Editor }).framit = this;
     document.body.dataset.ready = "1";
@@ -117,7 +123,7 @@ export class Editor {
    * Figma-like selection depth: the first click picks a top-level block; clicking inside the
    * selection drills one level; clicking a sibling keeps the current depth; ⌘/Ctrl picks the leaf.
    */
-  private pick(el: Element, opts: { deep: boolean; drill: boolean }): string | undefined {
+  pick(el: Element, opts: { deep: boolean; drill: boolean }): string | undefined {
     const chain = this.chainAt(el);
     if (!chain.length) return undefined;
     if (opts.deep) return chain[chain.length - 1];
@@ -222,6 +228,7 @@ export class Editor {
   private afterRender() {
     this.select(this.selection);
     this.inspector.refresh();
+    this.comments.schedule();
   }
 
   async reload() {
@@ -444,22 +451,24 @@ export class Editor {
       vp.addEventListener(
         type,
         (e) => {
-          if (this.mode !== "design") return;
+          if (this.mode === "preview") return;
           if (this.editing && this.editing.span.contains(e.target as Element)) return;
           if (type !== "contextmenu") e.preventDefault();
-          if (type === "dblclick") this.onDoubleClick(e as MouseEvent);
+          if (type === "dblclick" && this.mode === "design") this.onDoubleClick(e as MouseEvent);
+          if (type === "click" && this.mode === "comment") this.comments.onCanvasClick(e as MouseEvent);
         },
         true,
       );
     }
 
     vp.addEventListener("pointermove", (e) => {
-      if (this.mode !== "design" || this.dragging) return;
+      if (this.mode === "preview" || this.dragging) return;
       const el = e.target as Element;
-      const id = el.closest(".fx-frame-label") ? (el.closest<HTMLElement>(".fx-frame-label")!.dataset.frameLabel) : this.pick(el, { deep: e.metaKey || e.ctrlKey, drill: false });
+      const id = el.closest(".fx-frame-label") ? (el.closest<HTMLElement>(".fx-frame-label")!.dataset.frameLabel) : this.pick(el, { deep: this.mode === "comment" || e.metaKey || e.ctrlKey, drill: false });
       if (id !== this.hover) {
         this.hover = id;
-        this.overlay.schedule();
+        if (this.mode === "comment") this.comments.schedule(false);
+        else this.overlay.schedule();
       }
     });
     vp.addEventListener("pointerleave", () => {
@@ -749,7 +758,7 @@ export class Editor {
     location.href = `/p/screen/${encodeURIComponent(this.doc.id)}${frame ? `?frame=${encodeURIComponent(frame)}` : ""}`;
   }
 
-  setMode(mode: "design" | "preview") {
+  setMode(mode: Mode) {
     if (this.editing) this.endEdit(true);
     if (mode === "design" && this.navStack.length) {
       this.navStack = [];
@@ -758,12 +767,14 @@ export class Editor {
     this.mode = mode;
     document.body.dataset.mode = mode;
     document.querySelectorAll<HTMLElement>("[data-mode-btn]").forEach((b) => b.classList.toggle("is-on", b.dataset.modeBtn === mode));
-    if (mode === "preview") this.hover = undefined;
+    if (mode !== "design") this.hover = undefined;
+    if (mode !== "comment") this.comments.closeComposer();
     this.overlay.schedule();
+    this.comments.schedule();
   }
 
   private bindBar() {
-    document.querySelectorAll<HTMLElement>("[data-mode-btn]").forEach((b) => b.addEventListener("click", () => this.setMode(b.dataset.modeBtn as "design" | "preview")));
+    document.querySelectorAll<HTMLElement>("[data-mode-btn]").forEach((b) => b.addEventListener("click", () => this.setMode(b.dataset.modeBtn as Mode)));
     document.getElementById("fx-undo")!.addEventListener("click", () => this.undo());
     document.getElementById("fx-redo")!.addEventListener("click", () => this.redo());
     document.getElementById("fx-insert")!.addEventListener("click", () => openPalette(this));
@@ -806,6 +817,8 @@ export class Editor {
       if (mod && k === "-") return void (e.preventDefault(), this.viewport.zoomBy(0.8));
       if (!mod && k.toLowerCase() === "p") return this.setMode("preview");
       if (!mod && k.toLowerCase() === "v") return this.setMode("design");
+      if (!mod && k.toLowerCase() === "c") return this.setMode("comment");
+      if (this.mode === "comment" && k === "Escape") return void (this.comments.closeComposer() || this.setMode("design"));
       if (this.mode !== "design") return;
       if ((mod && k.toLowerCase() === "k") || k === "/") return void (e.preventDefault(), openPalette(this));
       if (mod && k.toLowerCase() === "d") return void (e.preventDefault(), this.duplicateSelection());

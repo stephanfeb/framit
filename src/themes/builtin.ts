@@ -140,7 +140,8 @@ export const wireLo: ResolvedTheme = {
   },
   notes:
     "Greyscale low-fidelity sketch. No colour at all: hierarchy comes from weight, size and spacing only. " +
-    "Heavier 1.5px strokes, small radii, no shadows. Images and charts render as crossed boxes. Use it early, " +
+    "Mono type and hand-drawn outlines (boxes are drawn as double pen strokes), no shadows. Images render as " +
+    "crossed boxes and charts in grey. Use it early, " +
     "when the conversation should be about structure and flow rather than visual polish.",
 };
 

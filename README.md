@@ -4,7 +4,33 @@ A local MCP server that turns text descriptions into editable, themed wireframes
 mobile screens, architecture diagrams, and user flows. Output is a live HTML canvas you can
 edit in the browser, and edits round-trip to the source so later sessions stay consistent.
 
-Status: M4 (architecture diagrams) complete. See [docs/](docs/README.md) and `docs/07-roadmap.md`.
+Status: M5 (catalogue and polish) complete. See [docs/](docs/README.md) and `docs/07-roadmap.md`.
+
+## Install
+
+Framit needs Node 20 or newer. Add it to Claude Code from the project you want to wireframe:
+
+```bash
+claude mcp add framit -- npx -y framit serve
+```
+
+Any other MCP client uses the same command over stdio:
+`{ "command": "npx", "args": ["-y", "framit", "serve"] }`.
+
+Then ask for something ("wireframe a settings page, desktop and phone"). On its first call the
+model creates `.framit/` in the project and gives you the local preview URL, where you can see
+and edit everything it draws.
+
+**Screenshots and export need a Chromium-based browser.** Framit uses an installed Google Chrome or
+Microsoft Edge if it finds one. Otherwise run `npx framit install-browser` once to download
+Playwright's Chromium. Without a browser, documents are still saved and editable; tool results just
+come without the screenshots the model uses to check its work.
+
+`npx framit doctor` checks Node, the project folder and the browser, and prints the setup lines.
+
+> The package is not on npm yet. Until it is, build from a checkout (see Development) and register
+> the local build: `claude mcp add -s user framit -- node /absolute/path/to/framit/dist/cli.js serve`.
+> `npm pack` produces the tarball that would be published.
 
 ## Quick orientation
 
@@ -18,7 +44,7 @@ Issues: `bd ready`.
 
 ```bash
 npm install
-npm run build      # server -> dist/cli.js, browser runtime -> dist/runtime/editor.js
+npm run build      # server -> dist/cli.js, browser runtimes -> dist/runtime/{editor,player,diagram}.js
 npm test           # vitest
 npm run typecheck
 ```
@@ -29,7 +55,8 @@ Inside this repo, `.mcp.json` registers the local build at project scope, so a C
 session started here picks up the `framit` tools after `npm run build` (approve the server
 when prompted).
 
-To use it from any other project, register it at user scope with an absolute path:
+To use the local build from any other project, register it at user scope with an absolute path
+(`node dist/cli.js doctor` prints this line for your checkout):
 
 ```bash
 claude mcp add -s user framit -- node /absolute/path/to/framit/dist/cli.js serve
@@ -38,7 +65,7 @@ claude mcp add -s user framit -- node /absolute/path/to/framit/dist/cli.js serve
 Framit stores everything in `.framit/` under the directory Claude Code was started in.
 Override with `--root <dir>` or the `FRAMIT_ROOT` environment variable.
 
-### Tools available today (M4)
+### Tools available today
 
 | Area | Tools |
 |------|-------|
@@ -48,11 +75,12 @@ Override with `--root <dir>` or the `FRAMIT_ROOT` environment variable.
 | Screens | `write_screen`, `patch_screen`, `read_screen`, `list_screens`, `delete_screen`, `duplicate_screen` |
 | Flows | `write_flow`, `patch_flow`, `read_flow`, `list_flows`, `delete_flow` |
 | Diagrams | `write_diagram`, `patch_diagram`, `read_diagram`, `list_diagrams`, `delete_diagram` |
-| Output | `render` (preview URL + screenshots), `export` (PNG, PDF, offline HTML prototype) |
+| Output | `render` (preview URL + screenshots), `export` (PNG, PDF, offline HTML prototype), `lint` (checks without screenshots) |
+| Prompts | `new-theme`, `wireframe`, `address-comments` |
 
 Writes return a PNG of every frame so the calling model can check its work. Screenshots use
-Playwright's Chromium if installed (`npx playwright install chromium`), otherwise an installed
-Google Chrome or Edge. Set `FRAMIT_SCREENSHOTS=0` to disable them.
+Playwright's Chromium if installed (`framit install-browser`), otherwise an installed Google Chrome
+or Edge; `init_project` reports which. Set `FRAMIT_SCREENSHOTS=0` to disable them.
 
 The preview server starts on first render on a random loopback port (`FRAMIT_PORT` to pin it).
 Open the `url` from any tool result to edit the screen: click to select (double-click to drill
@@ -71,5 +99,10 @@ Diagrams: ask for an architecture drawing ("draw the system context for this rep
 it out with elkjs: layered, with orthogonal arrows, in the project's theme. Open `/d/<id>` to tidy it.
 Drag nodes, which pins them; drag the ● handle onto another node to connect them; double-click any
 text to edit it. **Auto-layout** removes the pins again.
+
+Comments: press `C` in the editor and click any element to pin a comment to it. Claude sees open
+comments (`get_project`), changes the screen, replies and resolves them; the `address-comments` prompt
+runs that loop. The catalogue has 41 components, including modal, drawer, toast, alert, empty state
+and chart sketches. Themes with `fidelity: "lo"` (the `wire-lo` starter) render as hand-drawn sketches.
 
 See [docs/examples](docs/examples/README.md) for what a blind session produces.

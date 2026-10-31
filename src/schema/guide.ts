@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { COMPONENTS, type ComponentDef } from "../components/index.js";
+import { CATEGORIES, COMPONENTS, type ComponentDef } from "../components/index.js";
 import { SPACE_TOKENS, COLOR_TOKENS } from "./tokens.js";
 
 type JS = { type?: string | string[]; enum?: unknown[]; const?: unknown; anyOf?: JS[]; oneOf?: JS[]; items?: JS; properties?: Record<string, JS>; required?: string[]; default?: unknown; description?: string; $ref?: string; additionalProperties?: JS | boolean };
@@ -48,7 +48,7 @@ export const TYPE_LEGEND = `Space = ${SPACE_SIG} (theme spacing token or px). To
 
 export function componentReference(types?: string[]): string {
   const defs = Object.values(COMPONENTS).filter((d) => !types || types.includes(d.type));
-  const order = ["layout", "navigation", "content", "form", "data"];
+  const order: readonly string[] = CATEGORIES;
   defs.sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category));
   return defs
     .map((d) => {
@@ -145,6 +145,11 @@ Only containers take \`children\`.
 - Metrics: \`grid\` of \`card\`s each containing a \`stat\`. Use \`compactColumns\` for phones.
 - Mobile: \`topbar\` (title, leading "arrow-left" or "menu"), \`list\` with variant "inset" for grouped
   rows, \`text\` role "overline" as group labels, \`tabbar\` at the end.
+- Overlays: \`modal\`, \`drawer\` (side "bottom" is a phone sheet) and \`toast\` place themselves over the
+  frame; never position them. Put one as the last child of the root, and show the screen without it
+  in another frame (e.g. "Projects" and "Projects · delete dialog").
+- Charts: \`chart\` inside a \`card\` with a title. Give it a few plausible numbers, or omit series for a
+  sketch. Empty lists and first-run pages: \`empty-state\` with one primary action.
 - One primary button per region. Secondary actions use "secondary" or "ghost".
 - Icons are Lucide names in kebab-case (house, settings, users, bell, search, plus, chevron-right…).
 

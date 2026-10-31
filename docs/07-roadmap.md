@@ -77,15 +77,26 @@ architecture doc, and you can tidy it by hand.
 relabels an arrow, and a new MCP session then reads exactly that. The blind-session half is in
 [docs/examples](examples/README.md). Layout design: ADR-011.
 
-## M5 · Catalogue and polish
+## M5 · Catalogue and polish ✅
 
 - Component catalogue to ~40: tabs, modal, drawer, toast, alert, stat, chart sketches,
-  empty-state, pagination, breadcrumb, toggle, radio, textarea, image, icon, kbd, code.
-- `lint` tool and overflow detection in the screenshot pass.
-- Comment mode.
-- Lo-fi sketch rendering (hand-drawn strokes via SVG filters) as a theme fidelity.
-- `new-theme` and `wireframe` MCP prompts.
-- Packaging: `npx framit serve`, Playwright install guidance, first-run message.
+  empty-state, pagination, breadcrumb, toggle, radio, textarea, image, icon, kbd, code. ✅ 41
+  components; overlays are frame-level (see docs/03).
+- `lint` tool and overflow detection in the screenshot pass. ✅ Static rules (raw colours, unlabelled
+  fields, empty containers, missing screens, dead ends in flows) plus browser probes for overflow and
+  cut-off text, with no image tokens. Screenshots for the model are now 1x, at most four per result,
+  and `patch_screen` shows only the frames it changed.
+- Comment mode. ✅ Pins on nodes (by id), side list with replies, resolve and delete, open-count badge,
+  undo; the model sees open comments in `get_project` and resolves them with `patch_screen`.
+- Lo-fi sketch rendering (hand-drawn strokes via SVG filters) as a theme fidelity. ✅ CSS rather than
+  SVG filters. Displacement filters tore 1.5px strokes into dashes, so outlines are redrawn as two pen
+  passes with irregular elliptical corners, and text stays crisp. Lo-fi frames use the mono font. Applies
+  to any theme with `fidelity: "lo"`, and to diagrams.
+- `new-theme` and `wireframe` MCP prompts. ✅ Plus `address-comments`.
+- Packaging: `npx framit serve`, Playwright install guidance, first-run message. ✅ `framit doctor`
+  and `framit install-browser`; the browser falls back to an installed Chrome or Edge; `init_project`
+  tells the user the preview URL and screenshot status. The tarball (`npm pack`, about 120 KB) is
+  smoke-tested by installing it into an empty folder. Not yet published to npm.
 
 ## Later / maybe
 

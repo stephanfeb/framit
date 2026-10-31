@@ -49,6 +49,25 @@ export const Frame = z
   })
   .strict();
 
+export const CommentReply = z.object({ author: z.string().default("you"), text: z.string().min(1), createdAt: z.string().optional() }).strict();
+
+/**
+ * A review comment pinned to a node or frame (by id, so it follows the element through layout
+ * changes). Written by people in the editor's Comment mode, read and resolved by the model.
+ */
+export const Comment = z
+  .object({
+    id: z.string().optional().describe('Assigned ("c_…") if missing.'),
+    node: z.string().describe("Id of the node or frame the comment is pinned to."),
+    text: z.string().min(1),
+    author: z.string().default("you").describe('"claude" for the model; people default to "you".'),
+    createdAt: z.string().optional(),
+    resolved: z.boolean().optional(),
+    replies: z.array(CommentReply).optional(),
+  })
+  .strict();
+export type CommentT = z.infer<typeof Comment>;
+
 export const Screen = z
   .object({
     kind: z.literal("screen").optional(),
@@ -59,7 +78,7 @@ export const Screen = z
     frames: z.array(Frame).min(1),
     revision: z.number().int().optional(),
     updatedAt: z.string().optional(),
-    comments: z.array(z.unknown()).optional(),
+    comments: z.array(Comment).optional().describe("Review comments. Kept by write_screen when omitted."),
   })
   .strict();
 export type Screen = z.infer<typeof Screen>;

@@ -2,7 +2,7 @@ import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { COMPONENTS } from "../components/index.js";
+import { CATEGORIES, COMPONENTS } from "../components/index.js";
 import { FramitError } from "../errors.js";
 import { placeFrames, renderScreenPage, type RenderWarning } from "../renderer/render.js";
 import { componentReference, propLines, SCREEN_GUIDE, THEME_GUIDE, TYPE_LEGEND } from "../schema/guide.js";
@@ -15,12 +15,14 @@ import type { Store } from "../store/store.js";
 import { BUILTIN_THEMES } from "../themes/builtin.js";
 import { VERSION } from "../version.js";
 import { PreviewServer } from "./preview.js";
+import { lintScreen, type LintIssue } from "./lint.js";
 import { Screenshotter } from "./screenshot.js";
 import { Workspace } from "./workspace.js";
-import { Flow, FLOW_GUIDE, screenHotspots, type FlowT } from "../schema/flow.js";
+import { Flow, FLOW_GUIDE, type FlowT } from "../schema/flow.js";
 import { buildFlowView, checkFlow, loadFlow, type ProtoWarning } from "./prototype.js";
 import { runExport, type ExportFormat } from "./export.js";
 import { DIAGRAM_GUIDE, Diagram, type DiagramT } from "../schema/diagram.js";
+import type { DiagramLayout } from "../diagram/layout.js";
 
 const INSTRUCTIONS = `Framit turns descriptions into editable, themed wireframes (desktop and mobile screens) stored in
 .framit/ in the current project, with a local browser preview.
@@ -30,7 +32,8 @@ Typical session:
 2. describe_dsl once, to learn the screen format and component catalogue.
 3. Pick or create a theme: list_themes / get_theme (read its notes!) / create_theme.
 4. write_screen, then LOOK at the returned screenshots and fix problems with patch_screen.
-5. Give the user the preview URL. It opens an editor: they can select, retype text, change props,
+5. After several screens, run lint (no screenshots, so no image tokens) and fix what it finds.
+6. Give the user the preview URL. It opens an editor: they can select, retype text, change props,
    reorder, insert and move frames, and every edit is saved to the screen document.
 
 Prototypes: give buttons, links, nav/tab bar/list items a \`to\` prop naming another screen id, and they
@@ -43,7 +46,12 @@ kind=diagram first. People tidy diagrams by dragging nodes, which pins them: rea
 changing one and keep the ids and positions you find.
 
 Because people edit screens in the browser, read_screen before changing an existing screen and prefer
-patch_screen, which leaves their edits intact.`;
+patch_screen, which leaves their edits intact.
+
+Review comments: people pin comments to elements in the editor's Comment mode. get_project lists screens
+with open comments and read_screen shows them, each pinned to a node id. Address a comment, then resolve it
+with patch_screen: {op:"replace", node:"c_…", path:"/resolved", value:true}, plus a reply if useful:
+{op:"add", node:"c_…", path:"/replies/-", value:{author:"claude", text:"…"}}.`;
 
 type Image = { label: string; png: Buffer };
 type Out = { data: unknown; images?: Image[] };
@@ -78,6 +86,22 @@ export interface FramitServer {
   close(): Promise<void>;
 }
 
+function openComments(doc: Record<string, unknown>): Array<Record<string, unknown>> {
+  return (Array.isArray(doc.comments) ? (doc.comments as Array<Record<string, unknown>>) : []).filter((c) => !c.resolved);
+}
+
+/** At most this many frame screenshots per tool result; the rest are one `render` call away. */
+const MAX_FRAME_SHOTS = 4;
+
+/** Ids of frames that differ between two versions of a screen (all of them if screen-level fields changed). */
+export function touchedFrames(before: { frames?: Array<{ id?: string }> } & Record<string, unknown>, after: { frames?: Array<{ id?: string }> } & Record<string, unknown>): string[] {
+  const strip = ({ frames: _f, revision: _r, updatedAt: _u, ...rest }: Record<string, unknown>) => JSON.stringify(rest);
+  const all = (after.frames ?? []).map((f) => f.id!).filter(Boolean);
+  if (strip(before) !== strip(after)) return all;
+  const old = new Map((before.frames ?? []).map((f) => [f.id, JSON.stringify(f)]));
+  return (after.frames ?? []).filter((f) => old.get(f.id) !== JSON.stringify(f)).map((f) => f.id!);
+}
+
 export function createMcpServer(store: Store, opts: { screenshots?: boolean } = {}): McpServer {
   return createFramitServer(store, opts).mcp;
 }
@@ -91,16 +115,42 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
 
   // ---------- shared helpers ----------
 
+  /** Ids of flows that have this screen as a step. */
+  async function flowsWith(screenId: string): Promise<string[]> {
+    const flows: string[] = [];
+    for (const f of await store.list("flow")) if (((await store.read("flow", f.id)).steps as Array<{ screen: string }> | undefined)?.some((s) => s.screen === screenId)) flows.push(f.id);
+    return flows;
+  }
+
+  async function lintScreenDoc(doc: Record<string, unknown>): Promise<LintIssue[]> {
+    const screens = new Set((await store.list("screen")).map((s) => s.id));
+    const flows: Array<{ id: string; last: boolean; linked: Set<string> }> = [];
+    for (const f of await store.list("flow")) {
+      const d = await store.read("flow", f.id);
+      const steps = (d.steps as Array<{ screen: string }> | undefined) ?? [];
+      const i = steps.findIndex((s) => s.screen === doc.id);
+      if (i < 0) continue;
+      const linked = new Set(((d.edges as Array<{ from: { screen: string; node: string } }> | undefined) ?? []).filter((e) => e.from.screen === doc.id).map((e) => e.from.node));
+      flows.push({ id: f.id, last: i === steps.length - 1, linked });
+    }
+    return lintScreen(doc, { screens, flows });
+  }
+
   async function screenResult(id: string, extra: Record<string, unknown>, want: { screenshots: boolean; frames?: string[] }): Promise<Out> {
     const { doc, screen, theme } = await ws.screen(id);
     const url = await preview.ensureStarted();
     const warnings: RenderWarning[] = [...renderScreenPage(screen, theme).warnings];
-    const known = new Set((await store.list("screen")).map((s) => s.id));
-    for (const h of screenHotspots(doc)) if (!known.has(h.to)) warnings.push({ node: h.node, message: `Hotspot leads to "${h.to}", which is not a screen (yet). It does nothing until that screen exists.` });
-    const placed = placeFrames(screen, theme).filter((p) => !want.frames || want.frames.includes(p.frame.id));
+    warnings.push(...(await lintScreenDoc(doc)));
+    const all = placeFrames(screen, theme);
+    const placed = all.filter((p) => !want.frames || want.frames.includes(p.frame.id));
     const images: Image[] = [];
     if (want.screenshots && screenshotsEnabled) {
-      for (const p of placed) {
+      const shown = placed.slice(0, MAX_FRAME_SHOTS);
+      if (placed.length > shown.length) {
+        const rest = placed.slice(shown.length).map((p) => p.frame.id);
+        warnings.push({ message: `Screenshots of ${rest.length} more frame(s) (${rest.join(", ")}) skipped to save tokens. Call render with frame to see one.` });
+      }
+      for (const p of shown) {
         try {
           const cap = await shots.capture(`${url}/s/${screen.id}/f/${p.frame.id}`, { width: p.width, height: p.height });
           images.push({ label: `Frame ${p.frame.id}${p.frame.name ? ` "${p.frame.name}"` : ""} (${typeof p.frame.device === "string" ? p.frame.device : "custom"} ${p.width}×${p.height}):`, png: cap.png });
@@ -119,7 +169,8 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
         theme: theme.id,
         ...extra,
         url: `${url}/s/${screen.id}`,
-        frames: placed.map((p) => ({ id: p.frame.id, name: p.frame.name, device: p.frame.device, width: p.width, height: p.height, url: `${url}/s/${screen.id}/f/${p.frame.id}` })),
+        ...(want.frames && want.screenshots ? { screenshotted: placed.map((p) => p.frame.id) } : {}),
+        frames: all.map((p) => ({ id: p.frame.id, name: p.frame.name, device: p.frame.device, width: p.width, height: p.height, url: `${url}/s/${screen.id}/f/${p.frame.id}` })),
         warnings,
       },
       images,
@@ -196,21 +247,14 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
   async function diagramResult(id: string, extra: Record<string, unknown>, wantShot: boolean): Promise<Out> {
     const { doc, diagram, layout } = await ws.diagram(id);
     const url = await preview.ensureStarted();
-    const warnings: Array<{ node?: string; message: string }> = [...layout.warnings];
-    const linked = new Set(diagram.edges.flatMap((e) => [e.from, e.to]));
-    for (const n of diagram.nodes) {
-      if (!linked.has(n.id) && n.kind !== "note" && diagram.nodes.length > 1) warnings.push({ node: n.id, message: `"${n.label}" has no edges. Connect it or drop it.` });
-      if (n.label.length > 32) warnings.push({ node: n.id, message: `Label "${n.label}" is long; keep labels to 1–3 words and move detail into tech or description.` });
-    }
-    const pairs = new Set(diagram.edges.map((e) => `${e.from}\u0000${e.to}`));
-    for (const e of diagram.edges) if (e.from < e.to && pairs.has(`${e.to}\u0000${e.from}`)) warnings.push({ message: `Edges ${e.from} → ${e.to} and ${e.to} → ${e.from} both exist. Prefer one edge with bidirectional: true (and a label naming both directions) unless the two flows really differ.` });
-    if (diagram.nodes.length > 24) warnings.push({ message: `${diagram.nodes.length} nodes is a lot for one diagram; consider splitting it (context, then containers).` });
+    const warnings = diagramLint(diagram, layout);
     const images: Image[] = [];
     if (wantShot && screenshotsEnabled) {
       try {
         const w = Math.ceil(layout.bounds.w + 80), h = Math.ceil(layout.bounds.h + 80);
-        const cap = await shots.capture(`${url}/d/${encodeURIComponent(id)}?static&live=0`, { width: w, height: h, scale: w > 2200 ? 1 : w < 900 ? 2 : 1.5, selector: ".fx-board", maxHeight: 6000, noIssues: true });
+        const cap = await shots.capture(`${url}/d/${encodeURIComponent(id)}?static&live=0`, { width: w, height: h, selector: ".fx-board", maxHeight: 6000, noIssues: true });
         images.push({ label: `Diagram ${id} (${diagram.nodes.length} nodes, ${diagram.edges.length} edges):`, png: cap.png });
+        warnings.push(...(await shots.inspectBoard(`${url}/d/${encodeURIComponent(id)}?static&live=0`, { width: w, height: h })));
       } catch (err) {
         warnings.push({ message: `Screenshot unavailable: ${(err as Error).message}` });
       }
@@ -230,6 +274,19 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
     };
   }
 
+  function diagramLint(diagram: DiagramT, layout: DiagramLayout): Array<{ node?: string; message: string }> {
+    const warnings: Array<{ node?: string; message: string }> = [...layout.warnings];
+    const linked = new Set(diagram.edges.flatMap((e) => [e.from, e.to]));
+    for (const n of diagram.nodes) {
+      if (!linked.has(n.id) && n.kind !== "note" && diagram.nodes.length > 1) warnings.push({ node: n.id, message: `"${n.label}" has no edges. Connect it or drop it.` });
+      if (n.label.length > 32) warnings.push({ node: n.id, message: `Label "${n.label}" is long; keep labels to 1–3 words and move detail into tech or description.` });
+    }
+    const pairs = new Set(diagram.edges.map((e) => `${e.from}\u0000${e.to}`));
+    for (const e of diagram.edges) if (e.from < e.to && pairs.has(`${e.to}\u0000${e.from}`)) warnings.push({ message: `Edges ${e.from} → ${e.to} and ${e.to} → ${e.from} both exist. Prefer one edge with bidirectional: true (and a label naming both directions) unless the two flows really differ.` });
+    if (diagram.nodes.length > 24) warnings.push({ message: `${diagram.nodes.length} nodes is a lot for one diagram; consider splitting it (context, then containers).` });
+    return warnings;
+  }
+
   // ---------- project ----------
 
   mcp.registerTool(
@@ -246,7 +303,13 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
     tool(async ({ name, theme }: { name?: string; theme?: string }) => {
       const { project, created } = await store.init({ name, defaultTheme: theme });
       if (BUILTIN_THEMES[project.defaultTheme]) await ws.themeDoc(project.defaultTheme);
-      return { data: { created, root: store.root, store: store.base, project, next: "Call describe_dsl, then get_theme to read the default theme's notes." } };
+      const previewUrl = await preview.ensureStarted();
+      const browser = screenshotsEnabled ? await shots.status() : { ok: false, hint: "Screenshots are disabled (FRAMIT_SCREENSHOTS=0)." };
+      const screenshots = browser.ok ? `on, using ${browser.via} ${browser.version}` : `unavailable. ${browser.hint}`;
+      const tell = created
+        ? `Tell the user, once: Framit stores its documents in ${store.base}; they can open ${previewUrl} to see and edit everything you draw. Screenshots: ${screenshots}`
+        : undefined;
+      return { data: { created, root: store.root, store: store.base, project, previewUrl, screenshots, ...(tell ? { tell } : {}), next: "Call describe_dsl, then get_theme to read the default theme's notes." } };
     }),
   );
 
@@ -260,7 +323,21 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
     },
     tool(async () => {
       if (!(await store.isInitialized())) return { data: { initialized: false, root: store.root, hint: "Call init_project to create .framit/ here." } };
-      return { data: { initialized: true, root: store.root, project: await store.getProject(), counts: await store.counts(), previewUrl: preview.running ?? null } };
+      const open: Array<{ screen: string; comments: number }> = [];
+      for (const s of await store.list("screen")) {
+        const n = openComments(await store.read("screen", s.id)).length;
+        if (n) open.push({ screen: s.id, comments: n });
+      }
+      return {
+        data: {
+          initialized: true,
+          root: store.root,
+          project: await store.getProject(),
+          counts: await store.counts(),
+          previewUrl: preview.running ?? null,
+          ...(open.length ? { openComments: open, hint: "People left review comments. read_screen shows them; address each, then resolve it with patch_screen." } : {}),
+        },
+      };
     }),
   );
 
@@ -301,7 +378,7 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
       title: "List components",
       description: "Component types with summaries, props and an example node. Filter by category or types. preview=true adds a screenshot of those components rendered in a theme.",
       inputSchema: {
-        category: z.enum(["layout", "navigation", "content", "form", "data"]).optional(),
+        category: z.enum(CATEGORIES).optional(),
         types: z.array(z.string()).optional().describe("Only these component types."),
         preview: z.boolean().default(false),
         theme: z.string().optional().describe("Theme for the preview; defaults to the project default."),
@@ -466,6 +543,11 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
       const input: Record<string, unknown> = { ...screen };
       if (!input.id && typeof input.name === "string") input.id = slugify(input.name);
       input.theme ??= await ws.defaultThemeId();
+      // Comments are people's review notes: a rewrite that leaves them out keeps them.
+      if (!("comments" in input)) {
+        const existing = await store.read("screen", String(input.id)).catch(() => undefined);
+        if (Array.isArray(existing?.comments) && existing.comments.length) input.comments = existing.comments;
+      }
       validate(Screen, input, "screen");
       await ws.theme(String(input.theme));
       const { doc, changed } = await store.write("screen", input, { expectedRevision, source: "mcp" });
@@ -480,7 +562,7 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
       description:
         "Change part of a screen with node-addressed JSON Patch, leaving everything else (including a person's browser edits) intact. Preferred over write_screen for fixes. " +
         'Each op: { op: add|remove|replace|move|copy|test, node?: id, path?: "/props/label", value?, fromNode?, from? }. With `node`, path is relative to that node; ' +
-        '{op:"remove", node:"n_x"} deletes a node; {op:"add", node:"n_parent", path:"/children/-", value:{…}} appends; {op:"move", fromNode:"n_x", node:"n_parent", path:"/children/0"} moves. Returns screenshots of the frames.',
+        '{op:"remove", node:"n_x"} deletes a node; {op:"add", node:"n_parent", path:"/children/-", value:{…}} appends; {op:"move", fromNode:"n_x", node:"n_parent", path:"/children/0"} moves. Returns screenshots of the frames the patch changed.',
       inputSchema: {
         id: z.string(),
         ops: z.array(PatchOp).min(1),
@@ -493,8 +575,9 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
       if (expectedRevision !== undefined && current.revision !== expectedRevision) {
         throw new FramitError("REVISION", `Screen "${id}" is at revision ${current.revision}, not ${expectedRevision}.`, { hint: "Re-read it and reapply your change.", data: { current } });
       }
-      const { changed } = await ws.patchScreen(id, ops, { source: "mcp" });
-      return screenResult(id, { changed }, { screenshots });
+      const { doc, changed } = await ws.patchScreen(id, ops, { source: "mcp" });
+      // Screenshots of the frames this patch touched only: an image costs ~500-1500 tokens.
+      return screenResult(id, { changed }, { screenshots: screenshots && changed, frames: touchedFrames(current, doc) });
     }),
   );
 
@@ -527,7 +610,8 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
         const d = await store.read("screen", s.id);
         if (theme && d.theme !== theme) continue;
         const frames = Array.isArray(d.frames) ? (d.frames as Array<{ id?: string; name?: string; device?: unknown }>).map((f) => ({ id: f.id, name: f.name, device: f.device })) : [];
-        out.push({ id: s.id, name: s.name, description: d.description, theme: d.theme, frames, revision: s.revision, updatedAt: s.updatedAt });
+        const open = openComments(d).length;
+        out.push({ id: s.id, name: s.name, description: d.description, theme: d.theme, frames, revision: s.revision, updatedAt: s.updatedAt, ...(open ? { openComments: open } : {}) });
       }
       return { data: { screens: out, previewUrl: preview.running ?? null } };
     }),
@@ -543,8 +627,7 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
     },
     tool(async ({ id }: { id: string }) => {
       await store.delete("screen", id);
-      const flows: string[] = [];
-      for (const f of await store.list("flow")) if (((await store.read("flow", f.id)).steps as Array<{ screen: string }> | undefined)?.some((s) => s.screen === id)) flows.push(f.id);
+      const flows = await flowsWith(id);
       return { data: { deleted: id, ...(flows.length ? { brokenFlows: flows, hint: "These flows still list the screen as a step; patch_flow to remove it." } : {}) } };
     }),
   );
@@ -583,6 +666,71 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
         return { data: { url: sw.url, warning: sw.warning }, images: sw.image ? [sw.image] : [] };
       }
       return screenResult(id, {}, { screenshots: true, frames: frame ? [frame] : undefined });
+    }),
+  );
+
+  mcp.registerTool(
+    "lint",
+    {
+      title: "Lint",
+      description:
+        "Check documents without screenshots (no image tokens): raw colours instead of theme tokens, form fields without labels, empty containers, hotspots to missing screens, " +
+        "dead-end primary buttons in flow steps, flow steps nothing leads to, diagram problems, and (with layout=true, needs a browser) overflow and cut-off text. " +
+        "Omit id to check every document of the kind; omit kind as well to check the whole project. Run it before reporting a multi-screen job as done.",
+      inputSchema: {
+        kind: z.enum(["screen", "flow", "diagram"]).optional(),
+        id: z.string().optional().describe("One document; requires kind."),
+        layout: z.boolean().default(true).describe("Also run the browser layout checks (overflow, truncated text)."),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    tool(async ({ kind, id, layout }: { kind?: "screen" | "flow" | "diagram"; id?: string; layout: boolean }) => {
+      if (id && !kind) throw new FramitError("SCHEMA", "lint with an id needs kind (screen, flow or diagram).");
+      const kinds = kind ? [kind] : (["screen", "flow", "diagram"] as const);
+      const issues: Array<Record<string, unknown> & { message: string }> = [];
+      const notes: string[] = [];
+      let checked = 0;
+      let useBrowser = layout && screenshotsEnabled;
+      const url = await preview.ensureStarted();
+      const probe = async <T,>(fn: () => Promise<T[]>): Promise<T[]> => {
+        if (!useBrowser) return [];
+        try {
+          return await fn();
+        } catch (err) {
+          useBrowser = false;
+          notes.push(`Layout checks skipped: ${err instanceof FramitError ? `${err.message} ${err.hint ?? ""}` : (err as Error).message}`);
+          return [];
+        }
+      };
+      for (const k of kinds) {
+        const ids = id ? [id] : (await store.list(k)).map((d) => d.id);
+        for (const docId of ids) {
+          checked++;
+          const at = { kind: k, id: docId };
+          if (k === "screen") {
+            const { doc, screen, theme } = await ws.screen(docId);
+            for (const w of renderScreenPage(screen, theme).warnings) issues.push({ ...at, rule: "render", ...w });
+            for (const w of await lintScreenDoc(doc)) issues.push({ ...at, ...w });
+            for (const p of placeFrames(screen, theme)) {
+              for (const w of await probe(() => shots.inspect(`${url}/s/${screen.id}/f/${p.frame.id}`, { width: p.width, height: p.height }))) {
+                // Scrolling pages are normal; only the problems are worth a lint line.
+                if (/taller than the/.test(w.message)) continue;
+                issues.push({ ...at, rule: "layout", frame: p.frame.id, ...w });
+              }
+            }
+          } else if (k === "flow") {
+            const { flow } = await loadFlow(ws, docId);
+            const r = (await flowResult(docId, {}, false, await checkFlow(ws, flow))).data as { warnings: ProtoWarning[] };
+            for (const w of r.warnings) issues.push({ ...at, rule: "flow", ...w });
+          } else {
+            const { diagram, layout: l } = await ws.diagram(docId);
+            for (const w of diagramLint(diagram, l)) issues.push({ ...at, rule: "diagram", ...w });
+            const w = Math.ceil(l.bounds.w + 80), h = Math.ceil(l.bounds.h + 80);
+            for (const x of await probe(() => shots.inspectBoard(`${url}/d/${encodeURIComponent(docId)}?static&live=0`, { width: w, height: h }))) issues.push({ ...at, rule: "layout", ...x });
+          }
+        }
+      }
+      return { data: { checked, ok: issues.length === 0, issues, ...(notes.length ? { notes } : {}) } };
     }),
   );
 
@@ -794,6 +942,84 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
         },
       };
     }),
+  );
+
+  // ---------- prompts (docs/05-mcp-interface.md "Prompts") ----------
+
+  const userPrompt = (text: string) => ({ messages: [{ role: "user" as const, content: { type: "text" as const, text } }] });
+
+  mcp.registerPrompt(
+    "new-theme",
+    {
+      title: "New theme",
+      description: "Create a Framit theme for a product: gathers mode, fidelity, accent, density and a reference, then calls create_theme and checks the swatch sheet.",
+      argsSchema: {
+        product: z.string().optional().describe("What the product is and who it is for."),
+        mode: z.string().optional().describe("light or dark"),
+        fidelity: z.string().optional().describe("lo (greyscale sketch), mid (clean neutral) or hi (brand colour)"),
+        accent: z.string().optional().describe("Accent colour, e.g. #4f5bd5 or 'teal'"),
+        density: z.string().optional().describe("compact, comfortable or spacious"),
+        reference: z.string().optional().describe("A product whose feel to borrow, e.g. Linear or Stripe"),
+      },
+    },
+    (a: Record<string, string | undefined>) => {
+      const known = Object.entries(a).filter(([, v]) => v?.trim()).map(([k, v]) => `- ${k}: ${v}`);
+      const missing = ["product", "mode", "fidelity", "accent", "density", "reference"].filter((k) => !a[k]?.trim());
+      return userPrompt(`Create a Framit theme that later sessions will reuse for every screen of this product.
+
+${known.length ? `What I know:\n${known.join("\n")}
+
+` : ""}${missing.length ? `Ask me briefly about anything important that is missing (${missing.join(", ")}); propose sensible defaults instead of asking about all of it.
+
+` : ""}Then:
+1. get_project (init_project if needed) and list_themes; read the closest starter with get_theme.
+2. create_theme with \`from\` that starter and overrides for colours, type, radius, density and component settings.
+   Write \`notes\` for future sessions: where the accent is used, density, tone, what to avoid.
+3. Look at the returned swatch sheet. Fix contrast, spacing or anything that looks off with update_theme, and look again.
+4. Offer to make it the project's default theme, and show me the swatch preview URL.`);
+    },
+  );
+
+  mcp.registerPrompt(
+    "wireframe",
+    {
+      title: "Wireframe screens",
+      description: "Wireframe a set of screens for a product in one theme: write each, look at the screenshots, fix, then lint and link them into a flow.",
+      argsSchema: {
+        product: z.string().describe("The product and the job these screens do."),
+        screens: z.string().optional().describe("Screens to make, comma- or newline-separated, e.g. 'sign in, dashboard, settings'."),
+        devices: z.string().optional().describe("desktop, phone or both (default both)"),
+        theme: z.string().optional().describe("Theme id; defaults to the project's default theme."),
+      },
+    },
+    (a: Record<string, string | undefined>) =>
+      userPrompt(`Wireframe ${a.screens?.trim() ? `these screens: ${a.screens.trim()}` : "the key screens"} for: ${a.product ?? "(ask me what the product is)"}.
+Devices: ${a.devices?.trim() || "desktop and phone"}. Theme: ${a.theme?.trim() || "the project's default (get_project)"}.
+
+1. get_project (init_project if needed), describe_dsl once, and get_theme. Follow the theme's notes.
+${a.screens?.trim() ? "" : "   Propose the list of screens in one line before drawing.\n"}2. For each screen: write_screen with one frame per device, LOOK at the screenshots, and fix what's wrong
+   with patch_screen (overflow, cramped spacing, unclear hierarchy, more than one primary action per region).
+3. Link the screens with \`to\` props on the buttons and links that navigate, and write_flow if they form a journey.
+4. lint the project and fix what it reports.
+5. Finish with the preview URL and one line per screen. Keep the summary short.`),
+  );
+
+  mcp.registerPrompt(
+    "address-comments",
+    {
+      title: "Address review comments",
+      description: "Work through the open comments people left in the editor: change the screens, reply, resolve.",
+      argsSchema: { screen: z.string().optional().describe("One screen id; default: every screen with open comments.") },
+    },
+    (a: Record<string, string | undefined>) =>
+      userPrompt(`Address the open review comments ${a.screen?.trim() ? `on screen "${a.screen.trim()}"` : "in this Framit project (get_project lists the screens that have some)"}.
+
+For each screen: read_screen (comments are pinned to node ids), then for each open comment:
+- make the change with patch_screen, keeping everything else (people edited these screens);
+- add a short reply ({op:"add", node:"<comment id>", path:"/replies/-" or "/replies", value:{author:"claude", text}})
+  and resolve it ({op:"add", node:"<comment id>", path:"/resolved", value:true});
+- if a comment is a question or you disagree, reply and leave it open.
+Look at the returned screenshots after each change. Finish with a short list: comment → what you did.`),
   );
 
   return {

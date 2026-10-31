@@ -93,6 +93,7 @@ export function renderFrame(placed: PlacedFrame, theme: ResolvedTheme, opts: Fra
   const html = `<section class="fx-frame" data-frame="${esc(placed.frame.id)}"${opts.screen ? ` data-screen="${esc(opts.screen)}"` : ""} data-device="${deviceName(placed.frame.device)}" data-w="${placed.width}" data-h="${placed.height}" data-fx-theme="${esc(theme.id)}" data-fx-fidelity="${theme.fidelity}" style="${css({
     width: `${placed.width}px`,
     "min-height": `${placed.height}px`,
+    "--fx-vh": `${placed.height}px`,
     background: colorCss(placed.frame.background),
   })}"><div class="fx-frame-body">${body}</div></section>`;
   return { html, warnings };
@@ -167,10 +168,12 @@ export function renderEditorPage(screen: Screen, theme: ResolvedTheme, boot: Rec
   const bootJson = JSON.stringify(boot).replace(/</g, "\\u003c");
   return `${head(`${screen.name} · Framit`, theme, opts, opts.editorCss)}<body class="fx-editor" data-fx-mode="${theme.mode}" data-mode="design">
 <header id="fx-bar"><div class="fx-bar-left"><a class="fx-bar-home" href="/" title="All screens">◆</a><b class="fx-bar-name">${esc(screen.name)}</b><span class="fx-bar-meta">${esc(screen.id)} · ${esc(theme.name)}</span></div>
-<div class="fx-bar-mid"><div class="fx-seg" role="tablist"><button data-mode-btn="design" class="is-on" title="Design (V)">Design</button><button data-mode-btn="preview" title="Preview (P)">Preview</button></div></div>
+<div class="fx-bar-mid"><div class="fx-seg" role="tablist"><button data-mode-btn="design" class="is-on" title="Design (V)">Design</button><button data-mode-btn="preview" title="Preview (P)">Preview</button><button data-mode-btn="comment" title="Comment (C)">Comment <span class="fx-cm-count" hidden></span></button></div></div>
 <div class="fx-bar-right"><span id="fx-status" class="fx-status"></span><button id="fx-undo" title="Undo (⌘Z)" disabled>↶</button><button id="fx-redo" title="Redo (⇧⌘Z)" disabled>↷</button><button id="fx-insert" title="Insert component (/ or ⌘K)">＋</button><button id="fx-present" title="Present (⌘⇧P)">▶</button><button id="fx-zoom" title="Zoom to fit (⇧1)">100%</button><button id="fx-panel-toggle" title="Toggle inspector (⌘\\)">☰</button></div></header>
 <div id="fx-viewport"><div id="fx-canvas" data-screen="${esc(screen.id)}">${c.html}</div></div>
 <div id="fx-overlay"></div>
+<div id="fx-pins"></div>
+<aside id="fx-comments"></aside>
 <aside id="fx-inspector"><div class="fx-insp-empty">Select something to inspect it.<br><br><kbd>Click</kbd> select · <kbd>Click</kbd> again to go deeper · <kbd>Dbl-click</kbd> edit text · <kbd>Esc</kbd> parent · <kbd>/</kbd> insert · <kbd>⌘Z</kbd> undo · <kbd>Space</kbd>+drag pan · <kbd>⌘</kbd>+scroll zoom</div></aside>
 <div id="fx-toasts"></div>
 <script type="application/json" id="fx-boot">${bootJson}</script>

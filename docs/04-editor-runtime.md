@@ -126,6 +126,21 @@ A form generated from the node's Zod schema (via JSON Schema). Enums become sele
 toggles, numbers steppers, token-typed fields show the token palette. The `notes` field is
 always present. Read-only JSON of the node is available under a disclosure for debugging.
 
+## Comment mode (M5)
+
+`C` (or the Comment tab) switches to Comment mode. Clicking an element opens a composer. A comment is
+pinned to the deepest node under the pointer, by id, so the pin follows the element through
+re-layout and edits. Pins are numbered markers in a fixed layer, drawn from measured rects like the
+selection overlay.
+- **Side panel:** replaces the inspector and lists comments with the element each is on, author,
+  age and replies. Reply, Resolve/Reopen and Delete work there, and "Show resolved" reveals closed ones.
+- **Badge:** the Comment tab shows the open count in every mode.
+- **Undo:** every change is an ordinary patch on `/comments` (`add /comments/-`, then id-addressed
+  `/resolved` and `/replies`), so undo works.
+- **Live updates:** the model's replies and resolutions arrive over SSE like any other change.
+- **Rendering:** comments are never rendered into frames, screenshots or exports.
+- **Escape:** closes the composer, then returns to Design.
+
 ## Preview mode specifics
 
 - Form controls are real; typed values are ephemeral and never patched.

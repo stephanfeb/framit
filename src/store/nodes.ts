@@ -47,6 +47,8 @@ export function assignScreenIds(doc: Json): void {
   const frames = Array.isArray(doc.frames) ? doc.frames : [];
   for (const frame of frames) if (isObject(frame)) claim(frame, "f", "frames");
   walkScreenNodes(doc, (node) => claim(node, "n", "nodes"));
+  const comments = Array.isArray(doc.comments) ? doc.comments : [];
+  for (const c of comments) if (isObject(c)) claim(c, "c", "comments");
 
   for (const { obj, prefix } of missing) {
     let id = shortId(prefix);

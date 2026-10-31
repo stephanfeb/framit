@@ -2,7 +2,9 @@ import type { z } from "zod";
 import type { ResolvedTheme } from "../schema/theme.js";
 import type { Style } from "../schema/tokens.js";
 
-export type Category = "layout" | "content" | "form" | "data" | "navigation";
+/** Display order for the swatch sheet, the component reference and list_components. */
+export const CATEGORIES = ["layout", "navigation", "content", "form", "data", "feedback"] as const;
+export type Category = (typeof CATEGORIES)[number];
 
 /** A node as the renderer sees it: props already parsed (defaults applied). */
 export interface RenderNode<P> {

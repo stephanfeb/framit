@@ -4,7 +4,11 @@ import { FramitError } from "../errors.js";
 export interface CaptureOptions {
   width: number;
   height: number;
-  /** Device pixel ratio. Defaults to 2 for phone-width frames so text stays legible, else 1. */
+  /**
+   * Device pixel ratio, default 1. Image tokens scale with pixels: a phone frame at 1x is ~500
+   * tokens and fully legible; at 2x it was ~1500. Desktop frames are downscaled by the model's
+   * image pipeline anyway.
+   */
   scale?: number;
   /** Stop capturing below this many CSS pixels. */
   maxHeight?: number;
@@ -28,22 +32,36 @@ export interface Capture {
   issues: LayoutIssue[];
 }
 
+export const BROWSER_HINT =
+  "Run `npx framit install-browser` (downloads the Chromium build matching Framit's Playwright), or install Google Chrome. Documents are still saved; only screenshots and export need a browser.";
+
+export interface BrowserStatus {
+  ok: boolean;
+  /** Which browser launched: Playwright's Chromium, Google Chrome or Microsoft Edge. */
+  via?: string;
+  version?: string;
+  hint?: string;
+  errors?: string[];
+}
+
+const CANDIDATES: Array<{ via: string; channel?: string }> = [{ via: "Playwright Chromium" }, { via: "Google Chrome", channel: "chrome" }, { via: "Microsoft Edge", channel: "msedge" }];
+
 /** Launch headless Chromium: Playwright's bundled build, else an installed Chrome or Edge. */
-export async function launchChromium(): Promise<Browser> {
+export async function launchBrowser(): Promise<{ browser: Browser; via: string }> {
   const { chromium } = await import("playwright");
-  const attempts: Array<Parameters<typeof chromium.launch>[0]> = [{}, { channel: "chrome" }, { channel: "msedge" }];
   const errors: string[] = [];
-  for (const opts of attempts) {
+  for (const c of CANDIDATES) {
     try {
-      return await chromium.launch({ headless: true, ...opts });
+      return { browser: await chromium.launch({ headless: true, ...(c.channel ? { channel: c.channel } : {}) }), via: c.via };
     } catch (err) {
-      errors.push((err as Error).message.split("\n")[0]!);
+      errors.push(`${c.via}: ${(err as Error).message.split("\n")[0]!}`);
     }
   }
-  throw new FramitError("BROWSER", "No Chromium-based browser available for screenshots.", {
-    hint: "Run `npx playwright install chromium`, or install Google Chrome. The document was still saved.",
-    data: { errors },
-  });
+  throw new FramitError("BROWSER", "No Chromium-based browser available for screenshots.", { hint: BROWSER_HINT, data: { errors } });
+}
+
+export async function launchChromium(): Promise<Browser> {
+  return (await launchBrowser()).browser;
 }
 
 /**
@@ -51,19 +69,30 @@ export async function launchChromium(): Promise<Browser> {
  * Tries Playwright's bundled Chromium, then an installed Chrome or Edge.
  */
 export class Screenshotter {
-  private browser: Promise<Browser> | undefined;
+  private launched: Promise<{ browser: Browser; via: string }> | undefined;
 
-  private launch(): Promise<Browser> {
-    this.browser ??= launchChromium().catch((err) => {
-      this.browser = undefined;
+  private async launch(): Promise<Browser> {
+    this.launched ??= launchBrowser().catch((err) => {
+      this.launched = undefined;
       throw err;
     });
-    return this.browser;
+    return (await this.launched).browser;
+  }
+
+  /** Launch (or reuse) the browser and say which one it is, or why there is none. */
+  async status(): Promise<BrowserStatus> {
+    try {
+      const browser = await this.launch();
+      return { ok: true, via: (await this.launched!).via, version: browser.version() };
+    } catch (err) {
+      const e = err as FramitError;
+      return { ok: false, hint: e.hint ?? BROWSER_HINT, errors: (e.data as { errors?: string[] } | undefined)?.errors ?? [e.message] };
+    }
   }
 
   async capture(url: string, opts: CaptureOptions): Promise<Capture> {
     const browser = await this.launch();
-    const scale = opts.scale ?? (opts.width < 640 ? 2 : 1);
+    const scale = opts.scale ?? 1;
     const context = await browser.newContext({ viewport: { width: opts.width, height: opts.height }, deviceScaleFactor: scale });
     try {
       const page = await context.newPage();
@@ -84,6 +113,31 @@ export class Screenshotter {
     }
   }
 
+  /** The layout checks of `capture`, without taking (or returning) an image. */
+  async inspect(url: string, opts: CaptureOptions): Promise<LayoutIssue[]> {
+    return this.withPage({ width: opts.width, height: opts.height }, async (page) => {
+      await page.goto(url, { waitUntil: "load" });
+      await page.evaluate(() => document.fonts.ready);
+      if (opts.waitFor) await page.waitForSelector(opts.waitFor, { timeout: 10_000 });
+      return page.evaluate(detectLayoutIssues, { selector: opts.selector ?? ".fx-frame", deviceHeight: opts.height });
+    });
+  }
+
+  /** Diagram nodes whose text does not fit their box (the size estimate was too small). */
+  async inspectBoard(url: string, viewport: { width: number; height: number }): Promise<LayoutIssue[]> {
+    return this.withPage(viewport, async (page) => {
+      await page.goto(url, { waitUntil: "load" });
+      await page.evaluate(() => document.fonts.ready);
+      return page.evaluate(() =>
+        Array.from(document.querySelectorAll<HTMLElement>("[data-dnode]")).flatMap((n) => {
+          const box = n.getBoundingClientRect();
+          const over = Array.from(n.querySelectorAll<HTMLElement>("*")).reduce((m, c) => Math.max(m, c.getBoundingClientRect().bottom - box.bottom), 0);
+          return over > 1 ? [{ node: n.dataset.dnode, message: `Text in this node is clipped by ${Math.round(over)}px. Shorten the description or tech line.` }] : [];
+        }),
+      );
+    });
+  }
+
   /** Run `fn` with a fresh page in its own context (closed afterwards). */
   async withPage<T>(viewport: { width: number; height: number }, fn: (page: import("playwright").Page) => Promise<T>): Promise<T> {
     const browser = await this.launch();
@@ -96,9 +150,9 @@ export class Screenshotter {
   }
 
   async close(): Promise<void> {
-    const b = this.browser;
-    this.browser = undefined;
-    if (b) await (await b.catch(() => undefined))?.close().catch(() => undefined);
+    const l = this.launched;
+    this.launched = undefined;
+    if (l) await (await l.catch(() => undefined))?.browser.close().catch(() => undefined);
   }
 }
 
@@ -125,6 +179,21 @@ function detectLayoutIssues(args: { selector: string; deviceHeight: number }): L
       const owner = sc.closest("[data-node]") as HTMLElement | null;
       issues.push({ node: owner?.dataset.node, message: `table is ${sc.scrollWidth - sc.clientWidth}px wider than its container and scrolls horizontally; consider fewer columns or a list on narrow frames.` });
     }
+  }
+  // Text cut off by an ellipsis or a fixed size: the element's content is wider/taller than its box.
+  let truncated = 0;
+  for (const el of Array.from(frame.querySelectorAll<HTMLElement>("[data-node], [data-node] *"))) {
+    if (truncated >= 8 || el.closest(".fx-table-scroll")) continue;
+    const cs = getComputedStyle(el);
+    if (cs.overflowX === "visible" && cs.overflowY === "visible") continue;
+    // A text box: has text, and no component nodes inside it (those are checked on their own).
+    if (!el.textContent!.trim() || el.querySelector("[data-node]") || el.querySelector("svg, img")) continue;
+    const wide = el.scrollWidth - el.clientWidth, tall = el.scrollHeight - el.clientHeight;
+    if (wide <= 1 && tall <= 2) continue;
+    const owner = el.closest("[data-node]") as HTMLElement | null;
+    const text = el.textContent!.trim().replace(/\s+/g, " ");
+    issues.push({ node: owner?.dataset.node, message: `${owner?.dataset.type ?? "text"} "${text.length > 40 ? `${text.slice(0, 40)}…` : text}" is cut off${cs.textOverflow === "ellipsis" ? " with an ellipsis" : ""}. Shorten it or give it more room.` });
+    truncated++;
   }
   const extra = Math.round(fr.height - args.deviceHeight);
   if (extra > 4) issues.push({ message: `Content is ${extra}px taller than the ${args.deviceHeight}px viewport (the page scrolls).` });
