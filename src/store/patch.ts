@@ -1,15 +1,10 @@
 import { z } from "zod";
 import { FramitError } from "../errors.js";
+import { applyOps, PatchError, pointerOf, type Op } from "../shared/patch-core.js";
 
 /*
- * Node-ID-addressed JSON Patch (ADR-004). Each op is RFC 6902, plus optional `node` and
- * `fromNode`: when present, `path`/`from` are relative to that node (or frame), so a patch
- * stays valid when siblings are reordered by another writer.
- *
- *   { op: "replace", node: "n_7f3a", path: "/props/label", value: "Send" }
- *   { op: "add",     node: "n_list", path: "/children/-",  value: { type: "text", props: {...} } }
- *   { op: "remove",  node: "n_old" }                                  // whole node
- *   { op: "move",    fromNode: "n_btn", node: "n_row", path: "/children/0" }
+ * Server-side wrapper around the shared patch core: Zod validation of ops and conversion of
+ * patch errors into FramitErrors with hints. See src/shared/patch-core.ts for semantics.
  */
 
 export const PatchOp = z
@@ -24,127 +19,23 @@ export const PatchOp = z
   .strict();
 export type PatchOp = z.input<typeof PatchOp>;
 
-type Json = unknown;
-const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-
-/** Find the JSON Pointer of the frame or node with this id. */
-export function pointerOf(doc: Json, id: string): string | undefined {
-  const walk = (v: Json, ptr: string): string | undefined => {
-    if (Array.isArray(v)) {
-      for (let i = 0; i < v.length; i++) {
-        const r = walk(v[i], `${ptr}/${i}`);
-        if (r !== undefined) return r;
-      }
-    } else if (isObj(v)) {
-      if (v.id === id && (typeof v.type === "string" || "root" in v)) return ptr;
-      for (const [k, child] of Object.entries(v)) {
-        if (k === "props" && !isObj(child)) continue;
-        const r = walk(child, `${ptr}/${escape(k)}`);
-        if (r !== undefined) return r;
-      }
-    }
-    return undefined;
-  };
-  return walk(doc, "");
-}
-
-const escape = (k: string) => k.replace(/~/g, "~0").replace(/\//g, "~1");
-const unescape = (k: string) => k.replace(/~1/g, "/").replace(/~0/g, "~");
-
-function parse(ptr: string): string[] {
-  if (ptr === "") return [];
-  if (!ptr.startsWith("/")) throw new FramitError("SCHEMA", `Invalid JSON Pointer "${ptr}".`, { hint: 'Pointers start with "/", e.g. "/props/label".' });
-  return ptr.slice(1).split("/").map(unescape);
-}
-
-function resolve(doc: Json, node: string | undefined, path: string, i: number): string {
-  if (node === undefined) return path;
-  const base = pointerOf(doc, node);
-  if (base === undefined) throw new FramitError("NOT_FOUND", `Patch op ${i}: no node or frame with id "${node}".`, { hint: "Call read_screen to get current node ids." });
-  return base + path;
-}
-
-function get(doc: Json, tokens: string[], i: number): Json {
-  let cur = doc;
-  for (const t of tokens) {
-    if (Array.isArray(cur)) cur = cur[Number(t)];
-    else if (isObj(cur)) cur = cur[t];
-    else cur = undefined;
-    if (cur === undefined) throw new FramitError("SCHEMA", `Patch op ${i}: path /${tokens.join("/")} does not exist.`);
-  }
-  return cur;
-}
-
-function parentOf(doc: Json, tokens: string[], i: number, autoCreate: boolean): { parent: Record<string, unknown> | unknown[]; key: string } {
-  if (tokens.length === 0) throw new FramitError("SCHEMA", `Patch op ${i}: cannot target the document root.`);
-  let cur = doc;
-  for (const t of tokens.slice(0, -1)) {
-    let next: Json = Array.isArray(cur) ? cur[Number(t)] : isObj(cur) ? cur[t] : undefined;
-    if (next === undefined && autoCreate && isObj(cur)) next = cur[t] = {};
-    if (next === undefined) throw new FramitError("SCHEMA", `Patch op ${i}: path /${tokens.join("/")} does not exist.`);
-    cur = next;
-  }
-  if (!Array.isArray(cur) && !isObj(cur)) throw new FramitError("SCHEMA", `Patch op ${i}: parent of /${tokens.join("/")} is not a container.`);
-  return { parent: cur, key: tokens[tokens.length - 1]! };
-}
-
-function add(doc: Json, tokens: string[], value: Json, i: number) {
-  // Creating intermediate objects for "add" lets a caller set /props/x on a node without props.
-  const { parent, key } = parentOf(doc, tokens, i, true);
-  if (Array.isArray(parent)) {
-    const idx = key === "-" ? parent.length : Number(key);
-    if (!Number.isInteger(idx) || idx < 0 || idx > parent.length) throw new FramitError("SCHEMA", `Patch op ${i}: index ${key} out of range.`);
-    parent.splice(idx, 0, value);
-  } else parent[key] = value;
-}
-
-function remove(doc: Json, tokens: string[], i: number): Json {
-  const { parent, key } = parentOf(doc, tokens, i, false);
-  const value = get(doc, tokens, i);
-  if (Array.isArray(parent)) parent.splice(Number(key), 1);
-  else delete parent[key];
-  return value;
-}
+export { pointerOf };
 
 /** Apply ops to a deep copy of `doc`. All-or-nothing: on error the input is untouched. */
 export function applyPatch<T>(doc: T, ops: PatchOp[]): T {
-  const out = structuredClone(doc) as Json;
-  ops.forEach((raw, i) => {
-    const op = PatchOp.parse(raw);
-    const tokens = parse(resolve(out, op.node, op.path, i));
-    switch (op.op) {
-      case "add":
-        add(out, tokens, structuredClone(op.value), i);
-        break;
-      case "remove":
-        remove(out, tokens, i);
-        break;
-      case "replace": {
-        if (op.value === undefined) throw new FramitError("SCHEMA", `Patch op ${i}: replace needs a value.`);
-        const { parent, key } = parentOf(out, tokens, i, true);
-        if (Array.isArray(parent)) {
-          get(out, tokens, i);
-          parent[Number(key)] = structuredClone(op.value);
-        } else parent[key] = structuredClone(op.value);
-        break;
-      }
-      case "move":
-      case "copy": {
-        const fromTokens = parse(resolve(out, op.fromNode, op.from ?? "", i));
-        if (op.op === "move" && tokens.join("/").startsWith(fromTokens.join("/") + "/")) {
-          throw new FramitError("SCHEMA", `Patch op ${i}: cannot move a node into itself.`);
-        }
-        // Resolve the target before removing, then adjust for index shifts in the same array.
-        const value = op.op === "move" ? remove(out, fromTokens, i) : structuredClone(get(out, fromTokens, i));
-        let target = tokens;
-        if (op.op === "move" && op.node !== undefined) target = parse(resolve(out, op.node, op.path, i));
-        add(out, target, value, i);
-        break;
-      }
-      case "test":
-        if (JSON.stringify(get(out, tokens, i)) !== JSON.stringify(op.value)) throw new FramitError("SCHEMA", `Patch op ${i}: test failed at /${tokens.join("/")}.`);
-        break;
-    }
+  const parsed = ops.map((o, i) => {
+    const r = PatchOp.safeParse(o);
+    if (!r.success) throw new FramitError("SCHEMA", `Patch op ${i} is invalid: ${r.error.issues[0]?.message}`);
+    return r.data as Op;
   });
-  return out as T;
+  try {
+    return applyOps(doc, parsed);
+  } catch (err) {
+    if (err instanceof PatchError) {
+      throw new FramitError(err.code === "NOT_FOUND" ? "NOT_FOUND" : "SCHEMA", err.message, {
+        hint: err.code === "NOT_FOUND" ? "Call read_screen to get current node ids." : undefined,
+      });
+    }
+    throw err;
+  }
 }

@@ -152,3 +152,19 @@ from. No global store, no home-directory state beyond Playwright's browser cache
 **Reasons.** Consistency is per product. Themes and screens belong with the code they
 describe and should travel with its repository. Built-in starter themes ship in the package
 and are copied into the project on first use so they can be edited freely.
+
+---
+
+## ADR-009 · Server-Sent Events for change notifications, not WebSocket
+
+**Status:** accepted · 2026-10-31
+
+**Decision.** Change notifications flow server→browser over SSE (`GET /api/events`). Edits flow
+browser→server as ordinary `PATCH` requests.
+
+**Reasons.** Traffic is one-way in each direction, so a duplex socket adds nothing. SSE works
+with Hono and `fetch` without another dependency, reconnects on its own, and keeps writes on
+plain HTTP where origin and content-type checks already apply.
+
+**Consequences.** Shutdown must close open event streams (`closeAllConnections`) or the HTTP
+server never finishes closing.

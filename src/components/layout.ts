@@ -200,9 +200,9 @@ export const sidebar = defineComponent({
   render: (n, ctx) => {
     if (ctx.compact && !n.props.showOnPhone) return `<!-- sidebar ${esc(n.id)} hidden on phone -->`;
     const brand = n.props.brand
-      ? `<div class="fx-sidebar-brand">${n.props.brandIcon ? ctx.icon(n.props.brandIcon, 22) : ""}<span>${ctx.text(n.props.brand)}</span></div>`
+      ? `<div class="fx-sidebar-brand">${n.props.brandIcon ? ctx.icon(n.props.brandIcon, 22) : ""}${ctx.edit("/brand", n.props.brand)}</div>`
       : "";
-    const footer = n.props.footer ? `<div class="fx-sidebar-footer">${ctx.text(n.props.footer)}</div>` : "";
+    const footer = n.props.footer ? `<div class="fx-sidebar-footer">${ctx.edit("/footer", n.props.footer)}</div>` : "";
     return `<aside ${ctx.attrs(n, "fx-sidebar", { width: `${n.props.width}px`, gap: spaceCss(n.props.gap) })}>${brand}${ctx.renderAll(n.children)}${footer}</aside>`;
   },
 });
@@ -227,10 +227,10 @@ export const topbar = defineComponent({
     const p = n.props;
     const lead = p.leading ? `<span class="fx-topbar-leading">${ctx.icon(p.leading, 22)}</span>` : "";
     const title = p.title
-      ? `<div class="fx-topbar-title">${ctx.text(p.title)}${p.subtitle ? `<span class="fx-topbar-subtitle">${ctx.text(p.subtitle)}</span>` : ""}</div>`
+      ? `<div class="fx-topbar-title">${ctx.edit("/title", p.title)}${p.subtitle ? `<span class="fx-topbar-subtitle">${ctx.edit("/subtitle", p.subtitle)}</span>` : ""}</div>`
       : "";
     const search = p.search
-      ? `<div class="fx-topbar-search fx-control">${ctx.icon("search", 16, "fx-muted-icon")}<span class="fx-placeholder">${ctx.text(p.search)}</span></div>`
+      ? `<div class="fx-topbar-search fx-control">${ctx.icon("search", 16, "fx-muted-icon")}<span class="fx-placeholder">${ctx.edit("/search", p.search)}</span></div>`
       : "";
     return `<header ${ctx.attrs(n, cls("fx-topbar", p.border && "fx-topbar--border", p.center && "fx-topbar--center"))}>${lead}${title}${search}<div class="fx-topbar-actions">${ctx.renderAll(n.children)}</div></header>`;
   },
@@ -253,8 +253,8 @@ export const tabbar = defineComponent({
   render: (n, ctx) =>
     `<nav ${ctx.attrs(n, "fx-tabbar")}>${n.props.items
       .map(
-        (it) =>
-          `<a class="${cls("fx-tabbar-item", it.active && "is-active")}"${it.to ? ` data-to="${esc(it.to)}"` : ""}>${ctx.icon(it.icon, 22)}<span>${ctx.text(it.label)}</span>${it.badge !== undefined ? `<span class="fx-tabbar-badge">${ctx.text(it.badge)}</span>` : ""}</a>`,
+        (it, i) =>
+          `<a class="${cls("fx-tabbar-item", it.active && "is-active")}"${it.to ? ` data-to="${esc(it.to)}"` : ""}>${ctx.icon(it.icon, 22)}${ctx.edit(`/items/${i}/label`, it.label)}${it.badge !== undefined ? `<span class="fx-tabbar-badge">${ctx.text(it.badge)}</span>` : ""}</a>`,
       )
       .join("")}</nav>`,
 });
@@ -282,7 +282,7 @@ export const card = defineComponent({
     const variant = p.variant ?? (s.shadow && s.shadow !== "none" ? "elevated" : s.border === false ? "filled" : "outlined");
     const head =
       p.title || p.action
-        ? `<div class="fx-card-head"><div class="fx-card-titles">${p.title ? `<h3 class="fx-card-title">${ctx.text(p.title)}</h3>` : ""}${p.subtitle ? `<p class="fx-card-subtitle">${ctx.text(p.subtitle)}</p>` : ""}</div>${p.action ? `<a class="fx-link">${ctx.text(p.action)}</a>` : ""}</div>`
+        ? `<div class="fx-card-head"><div class="fx-card-titles">${p.title ? `<h3 class="fx-card-title">${ctx.edit("/title", p.title)}</h3>` : ""}${p.subtitle ? `<p class="fx-card-subtitle">${ctx.edit("/subtitle", p.subtitle)}</p>` : ""}</div>${p.action ? `<a class="fx-link">${ctx.edit("/action", p.action)}</a>` : ""}</div>`
         : "";
     return `<div ${ctx.attrs(n, cls("fx-card", `fx-card--${variant}`), {
       padding: p.padding !== undefined ? spaceCss(p.padding) : undefined,
@@ -324,7 +324,7 @@ export const section = defineComponent({
       : "";
     const head =
       p.title || p.description || actions
-        ? `<div class="fx-section-head"><div class="fx-section-titles">${p.title ? `<h2 class="fx-section-title">${ctx.text(p.title)}</h2>` : ""}${p.description ? `<p class="fx-section-desc">${ctx.text(p.description)}</p>` : ""}</div>${aside ? "" : actions}</div>`
+        ? `<div class="fx-section-head"><div class="fx-section-titles">${p.title ? `<h2 class="fx-section-title">${ctx.edit("/title", p.title)}</h2>` : ""}${p.description ? `<p class="fx-section-desc">${ctx.edit("/description", p.description)}</p>` : ""}</div>${aside ? "" : actions}</div>`
         : "";
     const body = `<div class="fx-section-body" style="gap:${spaceCss(p.gap)}">${ctx.renderAll(n.children)}${aside ? actions : ""}</div>`;
     return `<section ${ctx.attrs(n, cls("fx-section", aside && "fx-section--aside", p.divider && "fx-section--divider"))}>${head}${body}</section>`;
@@ -352,7 +352,7 @@ export const tabs = defineComponent({
     const strip = n.props.items
       .map((it, i) => {
         const t = typeof it === "string" ? { label: it } : it;
-        return `<button type="button" class="${cls("fx-tab", i === n.props.active && "is-active")}">${ctx.text(t.label)}${"count" in t && t.count !== undefined ? `<span class="fx-tab-count">${ctx.text(t.count)}</span>` : ""}</button>`;
+        return `<button type="button" class="${cls("fx-tab", i === n.props.active && "is-active")}">${ctx.edit(typeof it === "string" ? `/items/${i}` : `/items/${i}/label`, t.label)}${"count" in t && t.count !== undefined ? `<span class="fx-tab-count">${ctx.text(t.count)}</span>` : ""}</button>`;
       })
       .join("");
     const body = n.children.length ? `<div class="fx-tabs-panel" style="gap:${spaceCss(n.props.gap)}">${ctx.renderAll(n.children)}</div>` : "";

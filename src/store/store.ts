@@ -58,6 +58,8 @@ export interface ChangeEvent {
   kind: DocKind;
   id: string;
   revision: number | null; // null when deleted
+  /** Who made the change: an editor tab id, "mcp", or undefined. Lets a tab ignore its own echo. */
+  source?: string;
 }
 
 export class Store {
@@ -142,7 +144,7 @@ export class Store {
   async write(
     kind: DocKind,
     input: Record<string, unknown>,
-    opts: { expectedRevision?: number } = {},
+    opts: { expectedRevision?: number; source?: string } = {},
   ): Promise<WriteResult> {
     await this.requireInit();
     const id = input.id;
@@ -181,15 +183,15 @@ export class Store {
         updatedAt: new Date().toISOString(),
       };
       await atomicWriteJson(file, doc);
-      this.events.emit("change", { kind, id, revision: doc.revision } satisfies ChangeEvent);
+      this.events.emit("change", { kind, id, revision: doc.revision, source: opts.source } satisfies ChangeEvent);
       return { doc, changed: true };
     });
   }
 
-  async delete(kind: DocKind, id: string): Promise<void> {
+  async delete(kind: DocKind, id: string, source?: string): Promise<void> {
     await this.read(kind, id); // throws NOT_FOUND with suggestions
     await this.withLock(`${kind}/${id}`, () => rm(this.docFile(kind, id)));
-    this.events.emit("change", { kind, id, revision: null } satisfies ChangeEvent);
+    this.events.emit("change", { kind, id, revision: null, source } satisfies ChangeEvent);
   }
 
   async counts(): Promise<Record<DocKind, number>> {

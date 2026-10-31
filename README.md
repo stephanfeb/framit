@@ -4,7 +4,7 @@ A local MCP server that turns text descriptions into editable, themed wireframes
 mobile screens, architecture diagrams, and user flows. Output is a live HTML canvas you can
 edit in the browser, and edits round-trip to the source so later sessions stay consistent.
 
-Status: M1 (one beautiful screen) complete. See [docs/](docs/README.md) and `docs/07-roadmap.md`.
+Status: M2 (editable canvas) complete. See [docs/](docs/README.md) and `docs/07-roadmap.md`.
 
 ## Quick orientation
 
@@ -53,6 +53,10 @@ Playwright's Chromium if installed (`npx playwright install chromium`), otherwis
 Google Chrome or Edge. Set `FRAMIT_SCREENSHOTS=0` to disable them.
 
 The preview server starts on first render on a random loopback port (`FRAMIT_PORT` to pin it).
-Open the `url` from any tool result to see the canvas; it reloads when the screen changes.
+Open the `url` from any tool result to edit the screen: click to select (double-click to drill
+in), double-click text to retype it, change props in the floating toolbar or the inspector, drag
+to reorder, `/` to insert a component, drag frames by their label. Every edit saves to the
+screen document, so the next model session sees it. ⌘Z undoes. Changes made by the model show
+up live. `?static` gives the plain canvas.
 
 See [docs/examples](docs/examples/README.md) for what a blind session produces.

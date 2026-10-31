@@ -27,12 +27,13 @@ const NavItem: z.ZodType<NavItemShape> = z.lazy(() =>
     .strict(),
 );
 
-function navItems(items: NavItemShape[], ctx: RenderCtx, depth: number): string {
+function navItems(items: NavItemShape[], ctx: RenderCtx, depth: number, base: string): string {
   return items
-    .map((it) => {
-      if (it.heading !== undefined) return `<li class="fx-nav-heading">${ctx.text(it.heading)}</li>`;
-      const self = `<a class="${cls("fx-nav-item", it.active && "is-active", depth > 0 && "fx-nav-item--nested")}"${it.to ? ` data-to="${esc(it.to)}"` : ""}>${it.icon ? ctx.icon(it.icon, 18) : ""}<span class="fx-nav-label">${ctx.text(it.label ?? "")}</span>${it.badge !== undefined ? `<span class="fx-nav-badge">${ctx.text(it.badge)}</span>` : ""}</a>`;
-      const kids = it.children?.length ? `<ul class="fx-nav-sub">${navItems(it.children, ctx, depth + 1)}</ul>` : "";
+    .map((it, i) => {
+      const ptr = `${base}/${i}`;
+      if (it.heading !== undefined) return `<li class="fx-nav-heading">${ctx.edit(`${ptr}/heading`, it.heading)}</li>`;
+      const self = `<a class="${cls("fx-nav-item", it.active && "is-active", depth > 0 && "fx-nav-item--nested")}"${it.to ? ` data-to="${esc(it.to)}"` : ""}>${it.icon ? ctx.icon(it.icon, 18) : ""}<span class="fx-nav-label">${ctx.edit(`${ptr}/label`, it.label ?? "")}</span>${it.badge !== undefined ? `<span class="fx-nav-badge">${ctx.text(it.badge)}</span>` : ""}</a>`;
+      const kids = it.children?.length ? `<ul class="fx-nav-sub">${navItems(it.children, ctx, depth + 1, `${ptr}/children`)}</ul>` : "";
       return `<li>${self}${kids}</li>`;
     })
     .join("");
@@ -57,7 +58,7 @@ export const nav = defineComponent({
   },
   render: (n, ctx) => {
     const style = ctx.theme.components.nav?.activeStyle ?? "pill";
-    return `<nav ${ctx.attrs(n, cls("fx-nav", `fx-nav--${n.props.orientation}`, `fx-nav--active-${style}`))}><ul>${navItems(n.props.items, ctx, 0)}</ul></nav>`;
+    return `<nav ${ctx.attrs(n, cls("fx-nav", `fx-nav--${n.props.orientation}`, `fx-nav--active-${style}`))}><ul>${navItems(n.props.items, ctx, 0, "/items")}</ul></nav>`;
   },
 });
 
@@ -70,7 +71,7 @@ export const breadcrumb = defineComponent({
   example: { props: { items: ["Projects", "Apollo", "Settings"] } },
   render: (n, ctx) =>
     `<nav ${ctx.attrs(n, "fx-breadcrumb")}>${n.props.items
-      .map((it, i, all) => (i === all.length - 1 ? `<span class="fx-crumb is-current">${ctx.text(it)}</span>` : `<a class="fx-crumb">${ctx.text(it)}</a>${ctx.icon("chevron-right", 14, "fx-muted-icon")}`))
+      .map((it, i, all) => (i === all.length - 1 ? `<span class="fx-crumb is-current">${ctx.edit(`/items/${i}`, it)}</span>` : `<a class="fx-crumb">${ctx.edit(`/items/${i}`, it)}</a>${ctx.icon("chevron-right", 14, "fx-muted-icon")}`))
       .join("")}</nav>`,
 });
 
@@ -89,6 +90,6 @@ export const pagination = defineComponent({
       if (i > 0 && x - nums[i - 1]! > 1) parts.push(`<span class="fx-page-gap">…</span>`);
       parts.push(`<span class="${cls("fx-page", x === page && "is-active")}">${x}</span>`);
     });
-    return `<div ${ctx.attrs(n, "fx-pagination")}>${n.props.summary ? `<span class="fx-muted">${ctx.text(n.props.summary)}</span>` : "<span></span>"}<div class="fx-pages"><span class="fx-page">${ctx.icon("chevron-left", 16)}</span>${parts.join("")}<span class="fx-page">${ctx.icon("chevron-right", 16)}</span></div></div>`;
+    return `<div ${ctx.attrs(n, "fx-pagination")}>${n.props.summary ? `<span class="fx-muted">${ctx.edit("/summary", n.props.summary)}</span>` : "<span></span>"}<div class="fx-pages"><span class="fx-page">${ctx.icon("chevron-left", 16)}</span>${parts.join("")}<span class="fx-page">${ctx.icon("chevron-right", 16)}</span></div></div>`;
   },
 });

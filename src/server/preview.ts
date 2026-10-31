@@ -6,7 +6,13 @@ import { createRequire } from "node:module";
 import type { AddressInfo } from "node:net";
 import { FramitError } from "../errors.js";
 import { esc } from "../renderer/html.js";
-import { placeFrames, renderFrame, renderFramePage, renderScreenPage } from "../renderer/render.js";
+import { z } from "zod";
+import { COMPONENTS } from "../components/index.js";
+import { EDITOR_CSS } from "../renderer/editor-css.js";
+import { placeFrames, renderCanvas, renderEditorPage, renderFrame, renderFramePage, renderScreenPage } from "../renderer/render.js";
+import { COLOR_TOKENS, SPACE_TOKENS, TONES } from "../schema/tokens.js";
+import { PatchOp } from "../store/patch.js";
+import { loadRuntime } from "./runtime-bundle.js";
 import { renderSwatchPage } from "../renderer/swatch.js";
 import type { ChangeEvent, DocKind } from "../store/store.js";
 import { DOC_KINDS } from "../store/store.js";
@@ -51,7 +57,10 @@ export class PreviewServer {
   }
 
   async close(): Promise<void> {
-    await new Promise<void>((r) => (this.server ? this.server.close(() => r()) : r()));
+    const server = this.server as (ServerType & { closeAllConnections?: () => void }) | undefined;
+    // Open event streams from editor tabs would otherwise keep close() waiting.
+    server?.closeAllConnections?.();
+    await new Promise<void>((r) => (server ? server.close(() => r()) : r()));
     this.server = undefined;
     this.starting = undefined;
     this.url = undefined;
@@ -81,9 +90,57 @@ export class PreviewServer {
       return c.html(indexPage(project.name, screens, themes));
     });
 
+    // Mutating requests must come from our own pages. The server is loopback-only, but a
+    // web page in the user's browser could still try to send requests to it.
+    app.use("/api/*", async (c, next) => {
+      if (c.req.method !== "GET" && c.req.method !== "HEAD") {
+        const origin = c.req.header("origin");
+        const host = c.req.header("host");
+        if (!origin || !host || new URL(origin).host !== host) return c.json({ code: "FORBIDDEN", message: "Cross-origin write rejected." }, 403);
+        if (!(c.req.header("content-type") ?? "").includes("application/json")) return c.json({ code: "SCHEMA", message: "Expected application/json." }, 415);
+      }
+      await next();
+    });
+
+    app.get("/assets/editor.js", async (c) => {
+      const { code } = await loadRuntime();
+      return c.body(code, 200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" });
+    });
+
     app.get("/s/:id", async (c) => {
-      const { screen, theme } = await ws.screen(c.req.param("id"));
-      return c.html(renderScreenPage(screen, theme, { bodyEnd: liveReload("screen", screen.id) }).html);
+      const { doc, screen, theme } = await ws.screen(c.req.param("id"));
+      if (c.req.query("static") !== undefined) return c.html(renderScreenPage(screen, theme, { bodyEnd: liveReload("screen", screen.id) }).html);
+      return c.html(renderEditorPage(screen, theme, { kind: "screen", id: screen.id, revision: doc.revision }, { editorCss: EDITOR_CSS }));
+    });
+
+    app.get("/api/meta", (c) =>
+      c.json({
+        components: Object.fromEntries(
+          Object.values(COMPONENTS).map((d) => {
+            const { width: _w, ...example } = d.example;
+            return [d.type, { type: d.type, category: d.category, container: d.container, summary: d.summary, props: z.toJSONSchema(d.props, { io: "input", unrepresentable: "any" }), example: { type: d.type, ...example } }];
+          }),
+        ),
+        tokens: { space: SPACE_TOKENS, color: COLOR_TOKENS, tone: TONES },
+      }),
+    );
+
+    app.patch("/api/doc/screen/:id", async (c) => {
+      const body = (await c.req.json()) as { baseRevision?: number; ops?: unknown[] };
+      const ops = z.array(PatchOp).min(1).parse(body.ops ?? []);
+      try {
+        const r = await ws.patchScreen(c.req.param("id"), ops, { baseRevision: body.baseRevision, source: c.req.header("x-framit-client") ?? "browser" });
+        return c.json({ revision: r.doc.revision, rebased: r.rebased, doc: r.doc });
+      } catch (err) {
+        if (err instanceof FramitError && err.code === "REVISION") return c.json(err.toJSON(), 409);
+        throw err;
+      }
+    });
+
+    app.get("/api/render/canvas/:id", async (c) => {
+      const { doc, screen, theme } = await ws.screen(c.req.param("id"));
+      const r = renderCanvas(screen, theme);
+      return c.json({ revision: doc.revision, html: r.html, warnings: r.warnings });
     });
 
     app.get("/s/:id/f/:fid", async (c) => {

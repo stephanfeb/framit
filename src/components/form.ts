@@ -33,12 +33,12 @@ export const button = defineComponent({
     if (!p.label && !p.icon) ctx.warn(n.id, "button has neither label nor icon.");
     const iconOnly = !p.label && !!p.icon;
     const sz = p.size === "sm" ? 14 : p.size === "lg" ? 18 : 16;
-    return `<button type="button" ${ctx.attrs(n, cls("fx-button", `fx-button--${p.variant}`, `fx-button--${p.size}`, p.fullWidth && "fx-button--full", iconOnly && "fx-button--icon"))}${p.disabled ? " disabled" : ""}${p.to ? ` data-to="${esc(p.to)}"` : ""}>${p.icon ? ctx.icon(p.icon, sz) : ""}${p.label ? `<span>${ctx.text(p.label)}</span>` : ""}${p.iconRight ? ctx.icon(p.iconRight, sz) : ""}</button>`;
+    return `<button type="button" ${ctx.attrs(n, cls("fx-button", `fx-button--${p.variant}`, `fx-button--${p.size}`, p.fullWidth && "fx-button--full", iconOnly && "fx-button--icon"))}${p.disabled ? " disabled" : ""}${p.to ? ` data-to="${esc(p.to)}"` : ""}>${p.icon ? ctx.icon(p.icon, sz) : ""}${p.label ? ctx.edit("/label", p.label) : ""}${p.iconRight ? ctx.icon(p.iconRight, sz) : ""}</button>`;
   },
 });
 
 const fieldShell = (ctx: RenderCtx, p: { label?: string; hint?: string; error?: string; required?: boolean }, control: string) =>
-  `${p.label ? `<span class="fx-field-label">${ctx.text(p.label)}${p.required ? '<span class="fx-required">*</span>' : ""}</span>` : ""}${control}${p.error ? `<span class="fx-field-error">${ctx.icon("circle-alert", 14)}${ctx.text(p.error)}</span>` : p.hint ? `<span class="fx-field-hint">${ctx.text(p.hint)}</span>` : ""}`;
+  `${p.label ? `<span class="fx-field-label">${ctx.edit("/label", p.label)}${p.required ? '<span class="fx-required">*</span>' : ""}</span>` : ""}${control}${p.error ? `<span class="fx-field-error">${ctx.icon("circle-alert", 14)}${ctx.edit("/error", p.error)}</span>` : p.hint ? `<span class="fx-field-hint">${ctx.edit("/hint", p.hint)}</span>` : ""}`;
 
 const FieldBase = {
   label: z.string().optional(),
@@ -117,7 +117,7 @@ export const checkbox = defineComponent({
   props: z.object({ label: z.string(), checked: z.boolean().default(false), hint: z.string().optional(), disabled: z.boolean().default(false) }).strict(),
   example: { props: { label: "Email me about product updates", checked: true } },
   render: (n, ctx) =>
-    `<label ${ctx.attrs(n, cls("fx-check", n.props.disabled && "is-disabled"))}><input type="checkbox"${n.props.checked ? " checked" : ""}${n.props.disabled ? " disabled" : ""}><span class="fx-check-box">${ctx.icon("check", 12)}</span><span class="fx-check-text"><span>${ctx.text(n.props.label)}</span>${n.props.hint ? `<span class="fx-field-hint">${ctx.text(n.props.hint)}</span>` : ""}</span></label>`,
+    `<label ${ctx.attrs(n, cls("fx-check", n.props.disabled && "is-disabled"))}><input type="checkbox"${n.props.checked ? " checked" : ""}${n.props.disabled ? " disabled" : ""}><span class="fx-check-box">${ctx.icon("check", 12)}</span><span class="fx-check-text">${ctx.edit("/label", n.props.label)}${n.props.hint ? `<span class="fx-field-hint">${ctx.edit("/hint", n.props.hint)}</span>` : ""}</span></label>`,
 });
 
 export const toggle = defineComponent({
@@ -131,7 +131,7 @@ export const toggle = defineComponent({
     const p = n.props;
     const sw = `<span class="fx-switch"><input type="checkbox"${p.checked ? " checked" : ""}${p.disabled ? " disabled" : ""}><span class="fx-switch-track"></span></span>`;
     if (!p.label) return `<label ${ctx.attrs(n, "fx-toggle fx-toggle--bare")}>${sw}</label>`;
-    return `<label ${ctx.attrs(n, cls("fx-toggle", p.disabled && "is-disabled"))}><span class="fx-check-text"><span class="fx-toggle-label">${ctx.text(p.label)}</span>${p.hint ? `<span class="fx-field-hint">${ctx.text(p.hint)}</span>` : ""}</span>${sw}</label>`;
+    return `<label ${ctx.attrs(n, cls("fx-toggle", p.disabled && "is-disabled"))}><span class="fx-check-text"><span class="fx-toggle-label">${ctx.edit("/label", p.label)}</span>${p.hint ? `<span class="fx-field-hint">${ctx.edit("/hint", p.hint)}</span>` : ""}</span>${sw}</label>`;
   },
 });
 
@@ -154,14 +154,14 @@ export const radioGroup = defineComponent({
   example: { width: 300, props: { label: "Appearance", options: ["Light", "Dark", "System"], value: "System", direction: "row" } },
   render: (n, ctx) => {
     const p = n.props;
-    const opts = p.options.map((o) => (typeof o === "string" ? { label: o, hint: undefined } : o));
+    const opts = p.options.map((o, i) => (typeof o === "string" ? { label: o, hint: undefined, ptr: `/options/${i}` } : { ...o, ptr: `/options/${i}/label` }));
     const selected = p.value ?? opts[0]?.label;
     const items = opts
       .map(
         (o) =>
-          `<label class="${cls("fx-radio", o.label === selected && "is-checked")}"><input type="radio" name="${esc(n.id)}"${o.label === selected ? " checked" : ""}><span class="fx-radio-dot"></span><span class="fx-check-text"><span>${ctx.text(o.label)}</span>${o.hint ? `<span class="fx-field-hint">${ctx.text(o.hint)}</span>` : ""}</span></label>`,
+          `<label class="${cls("fx-radio", o.label === selected && "is-checked")}"><input type="radio" name="${esc(n.id)}"${o.label === selected ? " checked" : ""}><span class="fx-radio-dot"></span><span class="fx-check-text">${ctx.edit(o.ptr, o.label)}${o.hint ? `<span class="fx-field-hint">${ctx.text(o.hint)}</span>` : ""}</span></label>`,
       )
       .join("");
-    return `<div ${ctx.attrs(n, cls("fx-field", "fx-radio-group", `fx-radio-group--${p.direction}`, `fx-radio-group--${p.variant}`))} role="radiogroup">${p.label ? `<span class="fx-field-label">${ctx.text(p.label)}</span>` : ""}<div class="fx-radio-options">${items}</div></div>`;
+    return `<div ${ctx.attrs(n, cls("fx-field", "fx-radio-group", `fx-radio-group--${p.direction}`, `fx-radio-group--${p.variant}`))} role="radiogroup">${p.label ? `<span class="fx-field-label">${ctx.edit("/label", p.label)}</span>` : ""}<div class="fx-radio-options">${items}</div></div>`;
   },
 });

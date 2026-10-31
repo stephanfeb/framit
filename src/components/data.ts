@@ -37,13 +37,13 @@ const Column = z.union([
     .strict(),
 ]);
 
-function renderCell(c: Cell | undefined, ctx: RenderCtx): string {
+function renderCell(c: Cell | undefined, ctx: RenderCtx, ptr: string): string {
   if (c === undefined || c === null || c === "") return `<span class="fx-muted">—</span>`;
-  if (typeof c !== "object") return ctx.text(c);
-  if (c.badge !== undefined) return `<span class="fx-badge fx-badge--soft fx-tone-${c.tone ?? "neutral"}">${ctx.text(c.badge)}</span>`;
-  if (c.link !== undefined) return `<a class="fx-link">${ctx.text(c.link)}</a>`;
-  const main = `<span class="${cls(c.muted && "fx-muted", c.bold && "fx-strong", c.mono && "fx-mono", c.tone && `fx-tone-${c.tone}`)}">${ctx.text(c.text ?? "")}</span>`;
-  const body = c.sub ? `<span class="fx-cell-stack">${main}<span class="fx-cell-sub">${ctx.text(c.sub)}</span></span>` : main;
+  if (typeof c !== "object") return ctx.edit(ptr, c);
+  if (c.badge !== undefined) return `<span class="fx-badge fx-badge--soft fx-tone-${c.tone ?? "neutral"}">${ctx.edit(`${ptr}/badge`, c.badge)}</span>`;
+  if (c.link !== undefined) return `<a class="fx-link">${ctx.edit(`${ptr}/link`, c.link)}</a>`;
+  const main = `<span class="${cls(c.muted && "fx-muted", c.bold && "fx-strong", c.mono && "fx-mono", c.tone && `fx-tone-${c.tone}`)}">${ctx.edit(`${ptr}/text`, c.text ?? "")}</span>`;
+  const body = c.sub ? `<span class="fx-cell-stack">${main}<span class="fx-cell-sub">${ctx.edit(`${ptr}/sub`, c.sub)}</span></span>` : main;
   const lead = c.avatar !== undefined ? `<span class="fx-avatar-disc" style="width:28px;height:28px;font-size:11px;--fx-avatar-hue:${[...c.avatar].reduce((a, ch) => a + ch.charCodeAt(0), 0) % 360}">${esc(initials(c.avatar))}</span>` : c.icon ? ctx.icon(c.icon, 16, "fx-muted-icon") : "";
   return lead ? `<span class="fx-cell-lead">${lead}${body}</span>` : body;
 }
@@ -77,25 +77,26 @@ export const table = defineComponent({
   },
   render: (n, ctx) => {
     const p = n.props;
-    const cols = p.columns.map((c) => (typeof c === "string" ? { key: c, label: c, align: undefined, width: undefined } : { ...c, key: c.key ?? c.label }));
+    const cols = p.columns.map((c, i) => (typeof c === "string" ? { key: c, label: c, align: undefined, width: undefined, ptr: `/columns/${i}` } : { ...c, key: c.key ?? c.label, ptr: `/columns/${i}/label` }));
     const thAttr = (c: (typeof cols)[number]) => {
       const st = [c.align && c.align !== "left" ? `text-align:${c.align}` : "", c.width !== undefined ? `width:${typeof c.width === "number" ? `${c.width}px` : esc(c.width)}` : ""].filter(Boolean).join(";");
       return st ? ` style="${st}"` : "";
     };
     const check = `<td class="fx-td-check"><span class="fx-check-box"></span></td>`;
-    const head = `<tr>${p.selectable ? `<th class="fx-td-check"><span class="fx-check-box"></span></th>` : ""}${cols.map((c) => `<th${thAttr(c)}>${ctx.text(c.label)}</th>`).join("")}${p.rowActions ? "<th></th>" : ""}</tr>`;
+    const head = `<tr>${p.selectable ? `<th class="fx-td-check"><span class="fx-check-box"></span></th>` : ""}${cols.map((c) => `<th${thAttr(c)}>${typeof p.columns[cols.indexOf(c)] === "string" ? ctx.text(c.label) : ctx.edit(c.ptr, c.label)}</th>`).join("")}${p.rowActions ? "<th></th>" : ""}</tr>`;
     const body = p.rows
-      .map((r) => {
+      .map((r, ri) => {
         const cells = cols.map((c, i) => {
           const v = Array.isArray(r) ? r[i] : r[c.key];
-          return `<td${c.align && c.align !== "left" ? ` style="text-align:${c.align}"` : ""}>${renderCell(v, ctx)}</td>`;
+          const ptr = `/rows/${ri}/${Array.isArray(r) ? i : c.key.replace(/~/g, "~0").replace(/\//g, "~1")}`;
+          return `<td${c.align && c.align !== "left" ? ` style="text-align:${c.align}"` : ""}>${renderCell(v, ctx, ptr)}</td>`;
         });
         if (Array.isArray(r) && r.length > cols.length) ctx.warn(n.id, `table row has ${r.length} cells but only ${cols.length} columns.`);
         return `<tr>${p.selectable ? check : ""}${cells.join("")}${p.rowActions ? `<td class="fx-td-actions">${ctx.icon("ellipsis", 16, "fx-muted-icon")}</td>` : ""}</tr>`;
       })
       .join("");
     const s = ctx.theme.components.table ?? {};
-    const footer = p.footer ? `<div class="fx-table-footer">${ctx.text(p.footer)}</div>` : "";
+    const footer = p.footer ? `<div class="fx-table-footer">${ctx.edit("/footer", p.footer)}</div>` : "";
     return `<div ${ctx.attrs(n, cls("fx-table-wrap", p.framed && "fx-table-wrap--framed"))}><div class="fx-table-scroll"><table class="${cls("fx-table", p.dense && "fx-table--dense", s.header === "filled" && "fx-table--filled", s.zebra && "fx-table--zebra")}"><thead>${head}</thead><tbody>${body}</tbody></table></div>${footer}</div>`;
   },
 });
@@ -147,7 +148,7 @@ export const list = defineComponent({
   },
   render: (n, ctx) => {
     const items = n.props.items
-      .map((it) => {
+      .map((it, i) => {
         const l = it.leading;
         const lead = !l
           ? ""
@@ -175,7 +176,7 @@ export const list = defineComponent({
                       : t.button !== undefined
                         ? `<span class="fx-button fx-button--secondary fx-button--sm"><span>${ctx.text(t.button)}</span></span>`
                         : `${t.text !== undefined ? `<span class="fx-muted">${ctx.text(t.text)}</span>` : ""}${t.icon ? ctx.icon(t.icon, 18, "fx-muted-icon") : ""}`;
-        return `<li class="fx-list-item"${it.to ? ` data-to="${esc(it.to)}"` : ""}>${lead}<span class="fx-list-body"><span class="fx-list-top"><span class="fx-list-title">${ctx.text(it.title)}</span>${it.meta ? `<span class="fx-list-meta">${ctx.text(it.meta)}</span>` : ""}</span>${it.subtitle ? `<span class="fx-list-sub">${ctx.text(it.subtitle)}</span>` : ""}</span>${trail ? `<span class="fx-list-trail">${trail}</span>` : ""}</li>`;
+        return `<li class="fx-list-item"${it.to ? ` data-to="${esc(it.to)}"` : ""}>${lead}<span class="fx-list-body"><span class="fx-list-top"><span class="fx-list-title">${ctx.edit(`/items/${i}/title`, it.title)}</span>${it.meta ? `<span class="fx-list-meta">${ctx.edit(`/items/${i}/meta`, it.meta)}</span>` : ""}</span>${it.subtitle ? `<span class="fx-list-sub">${ctx.edit(`/items/${i}/subtitle`, it.subtitle)}</span>` : ""}</span>${trail ? `<span class="fx-list-trail">${trail}</span>` : ""}</li>`;
       })
       .join("");
     return `<ul ${ctx.attrs(n, cls("fx-list", n.props.divided && "fx-list--divided", `fx-list--${n.props.variant}`, n.props.dense && "fx-list--dense"))}>${items}</ul>`;

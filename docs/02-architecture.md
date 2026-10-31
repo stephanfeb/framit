@@ -40,9 +40,12 @@ requested and kept alive for the process lifetime. It:
 
 - serves the canvas page for a project, screen, diagram, or flow,
 - serves the editor runtime (JS and CSS) and the theme stylesheet,
-- accepts edit patches from the browser over HTTP (`PATCH /api/doc/:id`) and
-  pushes change notifications to open tabs over a WebSocket so a model-driven rewrite
-  shows up without a manual reload.
+- accepts edit patches from the browser over HTTP (`PATCH /api/doc/screen/:id`) and
+  pushes change notifications to open tabs over Server-Sent Events (`/api/events`) so a
+  model-driven rewrite shows up without a manual reload (ADR-009).
+
+`/s/:id` is the editor; `/s/:id?static` serves the plain canvas without the runtime, and
+`/s/:id/f/:fid` a single frame for screenshots.
 
 Port is chosen automatically and reported in tool results. Binds to 127.0.0.1 only.
 
@@ -98,7 +101,7 @@ and corrects before a human ever looks.
 1. Client calls `write_screen` with a document.
 2. Server validates against the schema, assigns IDs to nodes that lack them, writes JSON.
 3. Server renders, screenshots, and returns `{ id, url, screenshot, warnings }`.
-4. Any open browser tab for that screen receives a WebSocket `changed` event and re-fetches.
+4. Any open browser tab for that screen receives an SSE `change` event and re-fetches.
 
 ### Human edits on the canvas
 

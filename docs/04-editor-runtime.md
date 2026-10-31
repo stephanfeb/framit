@@ -73,9 +73,25 @@ DOM event ──► runtime builds JSON Patch (node-ID addressed)
           ◄── 409 { current }              ──► reload document, re-render frame, toast
 ```
 
-On a `changed` WebSocket event from another writer (a model tool call), the runtime re-fetches
-the document and re-renders only the affected frames, preserving selection by node ID where
-the node still exists.
+Each tab sends an `x-framit-client` id with its patches; the server tags the resulting
+`change` event with that source, so a tab ignores the echo of its own writes. On a `change`
+SSE event from another writer (a model tool call, another tab), the runtime re-fetches the
+document and re-renders, preserving selection by node ID where the node still exists, and
+toasts "Updated by Claude" when the writer was the MCP server.
+
+A patch whose `baseRevision` is stale is not rejected outright: if every op is addressed by
+node ID, the server applies it to the current document (another writer's change to a
+different node does not conflict). Only ops that cannot be rebased get a 409.
+
+Patches are sent through a serialized queue, one in flight at a time, so a fast sequence of
+edits keeps a consistent base revision.
+
+### Editable text: `data-prop`
+
+Components mark each editable string with `<span data-prop="/props/label">` (pointer relative
+to the node), including strings inside arrays such as nav items, table cells and tabs. The
+runtime needs no per-component knowledge to make text editable: double-click any `data-prop`
+element and commit writes to that pointer.
 
 Undo and redo are local to the tab: a stack of inverse patches, applied through the same
 PATCH route. `⌘Z` / `⇧⌘Z`.

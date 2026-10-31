@@ -25,9 +25,11 @@ Typical session:
 2. describe_dsl once, to learn the screen format and component catalogue.
 3. Pick or create a theme: list_themes / get_theme (read its notes!) / create_theme.
 4. write_screen, then LOOK at the returned screenshots and fix problems with patch_screen.
-5. Give the user the preview URL.
+5. Give the user the preview URL. It opens an editor: they can select, retype text, change props,
+   reorder, insert and move frames, and every edit is saved to the screen document.
 
-Screens may have been edited by a person in the browser: read_screen before changing an existing screen.`;
+Because people edit screens in the browser, read_screen before changing an existing screen and prefer
+patch_screen, which leaves their edits intact.`;
 
 type Image = { label: string; png: Buffer };
 type Out = { data: unknown; images?: Image[] };
@@ -367,7 +369,7 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
       input.theme ??= await ws.defaultThemeId();
       validate(Screen, input, "screen");
       await ws.theme(String(input.theme));
-      const { doc, changed } = await store.write("screen", input, { expectedRevision });
+      const { doc, changed } = await store.write("screen", input, { expectedRevision, source: "mcp" });
       return screenResult(doc.id, { changed }, { screenshots });
     }),
   );
@@ -392,10 +394,7 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
       if (expectedRevision !== undefined && current.revision !== expectedRevision) {
         throw new FramitError("REVISION", `Screen "${id}" is at revision ${current.revision}, not ${expectedRevision}.`, { hint: "Re-read it and reapply your change.", data: { current } });
       }
-      const next = applyPatch(current, ops);
-      validate(Screen, next, "patched screen");
-      if (typeof next.theme === "string") await ws.theme(next.theme);
-      const { changed } = await store.write("screen", next, { expectedRevision: current.revision });
+      const { changed } = await ws.patchScreen(id, ops, { source: "mcp" });
       return screenResult(id, { changed }, { screenshots });
     }),
   );
@@ -404,7 +403,7 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
     "read_screen",
     {
       title: "Read screen",
-      description: "The current screen document, including edits made in the browser, with its revision and preview URL. Call before modifying a screen you did not just write.",
+      description: "The current screen document, including edits a person made in the browser editor, with its revision and editor URL. Call before modifying a screen you did not just write, and keep node ids when rewriting.",
       inputSchema: { id: z.string(), screenshots: z.boolean().default(false) },
       annotations: { readOnlyHint: true },
     },

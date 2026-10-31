@@ -32,6 +32,11 @@ export interface RenderCtx {
   renderAll(nodes: AnyNode[]): string;
   /** Escape text and style [placeholder] slots. */
   text(s: string | number | undefined): string;
+  /**
+   * Like text(), wrapped in a span marking which prop it shows (JSON Pointer relative to the
+   * node's props, e.g. "/label" or "/items/2/label"), so the editor can edit it in place.
+   */
+  edit(pointer: string, s: string | number | undefined): string;
   icon(name: string, size?: number, extraClass?: string): string;
   /** `data-node`, `data-type`, class and merged inline style for a node's outer element. */
   attrs(node: RenderNode<unknown>, className: string, style?: Record<string, string | undefined>): string;

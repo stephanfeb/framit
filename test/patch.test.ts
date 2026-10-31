@@ -70,3 +70,44 @@ describe("node-addressed JSON Patch", () => {
     expect(() => applyPatch(doc(), [{ op: "test", node: "n_title", path: "/props/content", value: "Nope" }])).toThrow(/test failed/);
   });
 });
+
+import { applyOps, invertOps, stripIds, type Op } from "../src/shared/patch-core.js";
+
+describe("invertOps (undo)", () => {
+  const roundTrip = (ops: Op[]) => {
+    const before = doc();
+    const after = applyOps(before, ops);
+    const inv = invertOps(before, ops);
+    expect(applyOps(after, inv)).toEqual(before);
+    return inv;
+  };
+
+  it("inverts replace, add-prop and remove-prop", () => {
+    roundTrip([{ op: "replace", node: "n_btn", path: "/props/label", value: "Send" }]);
+    roundTrip([{ op: "add", node: "n_bare", path: "/props", value: { label: "or" } }]);
+    roundTrip([{ op: "remove", node: "n_title", path: "/props/content" }]);
+  });
+
+  it("inverts node insert, delete and move", () => {
+    expect(roundTrip([{ op: "add", node: "n_row", path: "/children/-", value: { id: "n_new", type: "text", props: { content: "x" } } }])).toEqual([{ op: "remove", node: "n_new" }]);
+    expect(roundTrip([{ op: "remove", node: "n_title" }])[0]).toMatchObject({ op: "add", node: "n_root", path: "/children/0" });
+    roundTrip([{ op: "move", fromNode: "n_btn", node: "n_root", path: "/children/0" }]);
+    roundTrip([{ op: "move", fromNode: "n_bare", node: "n_root", path: "/children/0" }]);
+  });
+
+  it("inverts multi-op batches in reverse order", () => {
+    roundTrip([
+      { op: "replace", node: "n_btn", path: "/props/label", value: "A" },
+      { op: "move", fromNode: "n_btn", node: "n_root", path: "/children/0" },
+      { op: "remove", node: "n_row" },
+    ]);
+  });
+
+  it("inverts frame moves", () => {
+    roundTrip([{ op: "add", node: "f_a", path: "/position", value: { x: 10, y: 20 } }]);
+  });
+
+  it("strips ids from a subtree", () => {
+    expect(stripIds(doc().frames[0]!.root).children[1]).toEqual({ type: "row", children: [{ type: "button", props: { label: "Go" } }] });
+  });
+});

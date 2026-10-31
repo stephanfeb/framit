@@ -36,7 +36,7 @@ export const text = defineComponent({
       "font-style": p.italic ? "italic" : undefined,
       "text-decoration": p.underline ? "underline" : undefined,
       "-webkit-line-clamp": p.maxLines ? String(p.maxLines) : undefined,
-    })}>${ctx.text(p.content)}</${tag}>`;
+    })}>${ctx.edit("/content", p.content)}</${tag}>`;
   },
 });
 
@@ -68,8 +68,8 @@ export const image = defineComponent({
   example: { width: 240, props: { aspect: "16:9", label: "Hero image" } },
   render: (n, ctx) => {
     const [w, h] = n.props.aspect.split(":");
-    const box = `<div class="fx-image-box" style="aspect-ratio:${w}/${h};border-radius:${radiusCss(n.props.radius)}">${ctx.icon(n.props.icon, 28)}${n.props.label ? `<span>${ctx.text(n.props.label)}</span>` : ""}</div>`;
-    return `<figure ${ctx.attrs(n, "fx-image")}>${box}${n.props.caption ? `<figcaption>${ctx.text(n.props.caption)}</figcaption>` : ""}</figure>`;
+    const box = `<div class="fx-image-box" style="aspect-ratio:${w}/${h};border-radius:${radiusCss(n.props.radius)}">${ctx.icon(n.props.icon, 28)}${n.props.label ? ctx.edit("/label", n.props.label) : ""}</div>`;
+    return `<figure ${ctx.attrs(n, "fx-image")}>${box}${n.props.caption ? `<figcaption>${ctx.edit("/caption", n.props.caption)}</figcaption>` : ""}</figure>`;
   },
 });
 
@@ -99,7 +99,7 @@ export const avatar = defineComponent({
     const disc = `<span class="${cls("fx-avatar-disc", p.shape === "square" && "fx-avatar--square")}" style="width:${px}px;height:${px}px;font-size:${Math.round(px * 0.38)}px;--fx-avatar-hue:${hue}">${esc(initials(p.name))}${p.status ? `<i class="fx-avatar-status fx-status-${p.status}"></i>` : ""}</span>`;
     const label =
       p.showName || p.caption
-        ? `<span class="fx-avatar-label"><span class="fx-avatar-name">${ctx.text(p.name)}</span>${p.caption ? `<span class="fx-avatar-caption">${ctx.text(p.caption)}</span>` : ""}</span>`
+        ? `<span class="fx-avatar-label"><span class="fx-avatar-name">${ctx.edit("/name", p.name)}</span>${p.caption ? `<span class="fx-avatar-caption">${ctx.edit("/caption", p.caption)}</span>` : ""}</span>`
         : "";
     return `<span ${ctx.attrs(n, "fx-avatar")}>${disc}${label}</span>`;
   },
@@ -122,7 +122,7 @@ export const badge = defineComponent({
   example: { props: { label: "Active", tone: "success", dot: true } },
   variants: (["neutral", "accent", "info", "success", "warning", "danger"] as const).map((tone) => ({ label: tone, tone })),
   render: (n, ctx) =>
-    `<span ${ctx.attrs(n, cls("fx-badge", `fx-badge--${n.props.variant}`, `fx-tone-${n.props.tone}`))}>${n.props.dot ? '<i class="fx-dot"></i>' : ""}${n.props.icon ? ctx.icon(n.props.icon, 12) : ""}${ctx.text(n.props.label)}</span>`,
+    `<span ${ctx.attrs(n, cls("fx-badge", `fx-badge--${n.props.variant}`, `fx-tone-${n.props.tone}`))}>${n.props.dot ? '<i class="fx-dot"></i>' : ""}${n.props.icon ? ctx.icon(n.props.icon, 12) : ""}${ctx.edit("/label", n.props.label)}</span>`,
 });
 
 export const divider = defineComponent({
@@ -135,7 +135,7 @@ export const divider = defineComponent({
   render: (n, ctx) =>
     `<div ${ctx.attrs(n, cls("fx-divider", n.props.vertical && "fx-divider--vertical", n.props.label && "fx-divider--label"), {
       margin: n.props.spacing === "none" ? undefined : n.props.vertical ? `0 ${spaceCss(n.props.spacing)}` : `${spaceCss(n.props.spacing)} 0`,
-    })} role="separator">${n.props.label ? `<span>${ctx.text(n.props.label)}</span>` : ""}</div>`,
+    })} role="separator">${n.props.label ? ctx.edit("/label", n.props.label) : ""}</div>`,
 });
 
 export const link = defineComponent({
@@ -155,7 +155,7 @@ export const link = defineComponent({
     .strict(),
   example: { props: { label: "Learn more", iconRight: "arrow-right" } },
   render: (n, ctx) =>
-    `<a ${ctx.attrs(n, cls("fx-link", `fx-link--${n.props.tone}`, n.props.underline && "fx-link--underline"))}${n.props.to ? ` data-to="${esc(n.props.to)}"` : ""}>${n.props.icon ? ctx.icon(n.props.icon, 16) : ""}<span>${ctx.text(n.props.label)}</span>${n.props.iconRight ? ctx.icon(n.props.iconRight, 16) : ""}</a>`,
+    `<a ${ctx.attrs(n, cls("fx-link", `fx-link--${n.props.tone}`, n.props.underline && "fx-link--underline"))}${n.props.to ? ` data-to="${esc(n.props.to)}"` : ""}>${n.props.icon ? ctx.icon(n.props.icon, 16) : ""}${ctx.edit("/label", n.props.label)}${n.props.iconRight ? ctx.icon(n.props.iconRight, 16) : ""}</a>`,
 });
 
 export const stat = defineComponent({
@@ -180,8 +180,8 @@ export const stat = defineComponent({
     const good = p.trend === "flat" || p.trend === undefined ? undefined : (p.trend === "up") !== p.invert;
     const tone = good === undefined ? "neutral" : good ? "success" : "danger";
     const arrow = p.trend === "up" ? "trending-up" : p.trend === "down" ? "trending-down" : "minus";
-    const delta = p.delta ? `<span class="fx-stat-delta fx-tone-${tone}">${p.trend ? ctx.icon(arrow, 14) : ""}${ctx.text(p.delta)}</span>` : "";
-    return `<div ${ctx.attrs(n, "fx-stat")}><div class="fx-stat-label">${p.icon ? ctx.icon(p.icon, 16) : ""}${ctx.text(p.label)}</div><div class="fx-stat-value">${ctx.text(p.value)}</div>${delta || p.caption ? `<div class="fx-stat-foot">${delta}${p.caption ? `<span class="fx-muted">${ctx.text(p.caption)}</span>` : ""}</div>` : ""}</div>`;
+    const delta = p.delta ? `<span class="fx-stat-delta fx-tone-${tone}">${p.trend ? ctx.icon(arrow, 14) : ""}${ctx.edit("/delta", p.delta)}</span>` : "";
+    return `<div ${ctx.attrs(n, "fx-stat")}><div class="fx-stat-label">${p.icon ? ctx.icon(p.icon, 16) : ""}${ctx.edit("/label", p.label)}</div><div class="fx-stat-value">${ctx.edit("/value", p.value)}</div>${delta || p.caption ? `<div class="fx-stat-foot">${delta}${p.caption ? `<span class="fx-muted">${ctx.edit("/caption", p.caption)}</span>` : ""}</div>` : ""}</div>`;
   },
 });
 
@@ -202,7 +202,7 @@ export const progress = defineComponent({
   example: { width: 240, props: { label: "Storage", value: 64, caption: "6.4 GB of 10 GB" } },
   render: (n, ctx) => {
     const p = n.props;
-    const head = p.label || p.showValue ? `<div class="fx-progress-head"><span>${ctx.text(p.label ?? "")}</span>${p.showValue ? `<span class="fx-muted">${Math.round(p.value)}%</span>` : ""}</div>` : "";
-    return `<div ${ctx.attrs(n, "fx-progress")}>${head}<div class="fx-progress-track"><div class="fx-progress-bar fx-bg-${p.tone}" style="width:${p.value}%"></div></div>${p.caption ? `<div class="fx-caption fx-muted">${ctx.text(p.caption)}</div>` : ""}</div>`;
+    const head = p.label || p.showValue ? `<div class="fx-progress-head">${ctx.edit("/label", p.label ?? "")}${p.showValue ? `<span class="fx-muted">${Math.round(p.value)}%</span>` : ""}</div>` : "";
+    return `<div ${ctx.attrs(n, "fx-progress")}>${head}<div class="fx-progress-track"><div class="fx-progress-bar fx-bg-${p.tone}" style="width:${p.value}%"></div></div>${p.caption ? `<div class="fx-caption fx-muted">${ctx.edit("/caption", p.caption)}</div>` : ""}</div>`;
   },
 });

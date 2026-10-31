@@ -24,6 +24,24 @@ export interface Capture {
   issues: LayoutIssue[];
 }
 
+/** Launch headless Chromium: Playwright's bundled build, else an installed Chrome or Edge. */
+export async function launchChromium(): Promise<Browser> {
+  const { chromium } = await import("playwright");
+  const attempts: Array<Parameters<typeof chromium.launch>[0]> = [{}, { channel: "chrome" }, { channel: "msedge" }];
+  const errors: string[] = [];
+  for (const opts of attempts) {
+    try {
+      return await chromium.launch({ headless: true, ...opts });
+    } catch (err) {
+      errors.push((err as Error).message.split("\n")[0]!);
+    }
+  }
+  throw new FramitError("BROWSER", "No Chromium-based browser available for screenshots.", {
+    hint: "Run `npx playwright install chromium`, or install Google Chrome. The document was still saved.",
+    data: { errors },
+  });
+}
+
 /**
  * Headless Chromium screenshots (ADR-007). The browser launches on first use and is reused.
  * Tries Playwright's bundled Chromium, then an installed Chrome or Edge.
@@ -32,23 +50,10 @@ export class Screenshotter {
   private browser: Promise<Browser> | undefined;
 
   private launch(): Promise<Browser> {
-    this.browser ??= (async () => {
-      const { chromium } = await import("playwright");
-      const attempts: Array<Parameters<typeof chromium.launch>[0]> = [{}, { channel: "chrome" }, { channel: "msedge" }];
-      const errors: string[] = [];
-      for (const opts of attempts) {
-        try {
-          return await chromium.launch({ headless: true, ...opts });
-        } catch (err) {
-          errors.push((err as Error).message.split("\n")[0]!);
-        }
-      }
+    this.browser ??= launchChromium().catch((err) => {
       this.browser = undefined;
-      throw new FramitError("BROWSER", "No Chromium-based browser available for screenshots.", {
-        hint: "Run `npx playwright install chromium`, or install Google Chrome. The document was still saved.",
-        data: { errors },
-      });
-    })();
+      throw err;
+    });
     return this.browser;
   }
 

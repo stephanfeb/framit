@@ -30,18 +30,22 @@ phone" produces something you would paste into a doc, without the model seeing t
 image, icon, link, stat, progress, breadcrumb, pagination, tabbar, topbar, sidebar, spacer).
 Result: [docs/examples](examples/README.md).
 
-## M2 · Editable canvas
+## M2 · Editable canvas ✅
 
 - Canvas shell: pan, zoom, fit, frame drag and resize.
 - Selection with deep-select, hover labels, handles.
 - Inline text editing, floating toolbar for text and buttons.
-- Node-ID JSON Patch pipeline, `PATCH /api/doc`, revision checks, WebSocket change events.
+- Node-ID JSON Patch pipeline, `PATCH /api/doc`, revision checks, SSE change events.
 - Partial frame re-render from server.
 - Undo/redo.
 - Inspector panel generated from schema.
 
 **Done when:** you edit three labels and move a frame in the browser, then `read_screen` in
 a new session shows exactly that.
+
+*Shipped with* reorder and reparent by drag, a component palette (`/` or ⌘K), duplicate and
+delete, keyboard nudging. Runtime is ~13 KB gzipped. The acceptance criterion is an automated
+test (`test/editor.test.ts`, "M2 acceptance").
 
 ## M3 · Preview mode and flows
 

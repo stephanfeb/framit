@@ -56,6 +56,7 @@ export function createCtx(theme: ResolvedTheme, frameWidth: number, frameId: str
     render: (node) => renderNode(node, ctx),
     renderAll: (nodes) => nodes.map((n) => renderNode(n, ctx)).join(""),
     text: richText,
+    edit: (pointer, s) => `<span data-prop="${esc(pointer)}">${richText(s)}</span>`,
     icon: (name, size, extra) => {
       const { svg, known } = iconSvg(name, size, extra);
       if (!known) {
@@ -115,21 +116,50 @@ function head(title: string, theme: ResolvedTheme, opts: PageOptions, extraCss =
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><style>${fontCss}${UNKNOWN_CSS}${CANVAS_CSS}${compileThemeCss(theme)}${extraCss}</style></head>`;
 }
 
-/** The canvas page: every frame of a screen at its position, with labels. */
-export function renderScreenPage(screen: Screen, theme: ResolvedTheme, opts: PageOptions = {}): { html: string; warnings: RenderWarning[] } {
+/**
+ * Frame slots for a canvas: each frame with its label, at its position. With `normalize`
+ * the top-left frame sits at (0,0) (static pages); without it, real canvas coordinates are
+ * kept (the editor applies its own pan/zoom transform).
+ */
+export function renderCanvas(screen: Screen, theme: ResolvedTheme, opts: { normalize?: boolean } = {}): { html: string; width: number; height: number; warnings: RenderWarning[]; placed: PlacedFrame[] } {
   const placed = placeFrames(screen, theme);
   const warnings: RenderWarning[] = [];
-  const minX = Math.min(...placed.map((p) => p.x));
-  const minY = Math.min(...placed.map((p) => p.y));
-  const slots = placed.map((p) => {
-    const r = renderFrame(p, theme);
-    warnings.push(...r.warnings);
-    return `<div class="fx-frame-slot" style="left:${p.x - minX}px;top:${p.y - minY}px"><div class="fx-frame-label">${esc(frameLabel(p))}</div>${r.html}</div>`;
-  });
-  const w = Math.max(...placed.map((p) => p.x - minX + p.width));
-  const h = Math.max(...placed.map((p) => p.y - minY + p.height)) + 40;
-  const html = `${head(`${screen.name} · Framit`, theme, opts)}<body class="fx-canvas-page" data-fx-mode="${theme.mode}"><div class="fx-canvas-head"><b>${esc(screen.name)}</b><span>${esc(screen.id)} · ${esc(theme.name)}</span></div><div class="fx-canvas" data-screen="${esc(screen.id)}" style="width:${w}px;min-height:${h}px">${slots.join("")}</div>${opts.bodyEnd ?? ""}</body></html>`;
-  return { html, warnings };
+  const minX = opts.normalize ? Math.min(...placed.map((p) => p.x)) : 0;
+  const minY = opts.normalize ? Math.min(...placed.map((p) => p.y)) : 0;
+  const html = placed
+    .map((p) => {
+      const r = renderFrame(p, theme);
+      warnings.push(...r.warnings);
+      return `<div class="fx-frame-slot" data-slot="${esc(p.frame.id)}" data-x="${p.x}" data-y="${p.y}" style="left:${p.x - minX}px;top:${p.y - minY}px"><div class="fx-frame-label" data-frame-label="${esc(p.frame.id)}">${esc(frameLabel(p))}</div>${r.html}</div>`;
+    })
+    .join("");
+  const width = Math.max(...placed.map((p) => p.x - minX + p.width));
+  const height = Math.max(...placed.map((p) => p.y - minY + p.height)) + 40;
+  return { html, width, height, warnings, placed };
+}
+
+/** The static canvas page: every frame of a screen at its position, with labels. */
+export function renderScreenPage(screen: Screen, theme: ResolvedTheme, opts: PageOptions = {}): { html: string; warnings: RenderWarning[] } {
+  const c = renderCanvas(screen, theme, { normalize: true });
+  const html = `${head(`${screen.name} · Framit`, theme, opts)}<body class="fx-canvas-page" data-fx-mode="${theme.mode}"><div class="fx-canvas-head"><b>${esc(screen.name)}</b><span>${esc(screen.id)} · ${esc(theme.name)}</span></div><div class="fx-canvas" data-screen="${esc(screen.id)}" style="width:${c.width}px;min-height:${c.height}px">${c.html}</div>${opts.bodyEnd ?? ""}</body></html>`;
+  return { html, warnings: c.warnings };
+}
+
+/** The editor page: canvas with real coordinates inside the editing shell (docs/04-editor-runtime.md). */
+export function renderEditorPage(screen: Screen, theme: ResolvedTheme, boot: Record<string, unknown>, opts: PageOptions & { editorCss: string } ): string {
+  const c = renderCanvas(screen, theme);
+  const bootJson = JSON.stringify(boot).replace(/</g, "\\u003c");
+  return `${head(`${screen.name} · Framit`, theme, opts, opts.editorCss)}<body class="fx-editor" data-fx-mode="${theme.mode}" data-mode="design">
+<header id="fx-bar"><div class="fx-bar-left"><a class="fx-bar-home" href="/" title="All screens">◆</a><b class="fx-bar-name">${esc(screen.name)}</b><span class="fx-bar-meta">${esc(screen.id)} · ${esc(theme.name)}</span></div>
+<div class="fx-bar-mid"><div class="fx-seg" role="tablist"><button data-mode-btn="design" class="is-on" title="Design (V)">Design</button><button data-mode-btn="preview" title="Preview (P)">Preview</button></div></div>
+<div class="fx-bar-right"><span id="fx-status" class="fx-status"></span><button id="fx-undo" title="Undo (⌘Z)" disabled>↶</button><button id="fx-redo" title="Redo (⇧⌘Z)" disabled>↷</button><button id="fx-insert" title="Insert component (/ or ⌘K)">＋</button><button id="fx-zoom" title="Zoom to fit (⇧1)">100%</button><button id="fx-panel-toggle" title="Toggle inspector (⌘\\)">☰</button></div></header>
+<div id="fx-viewport"><div id="fx-canvas" data-screen="${esc(screen.id)}">${c.html}</div></div>
+<div id="fx-overlay"></div>
+<aside id="fx-inspector"><div class="fx-insp-empty">Select something to inspect it.<br><br><kbd>Click</kbd> select · <kbd>Click</kbd> again to go deeper · <kbd>Dbl-click</kbd> edit text · <kbd>Esc</kbd> parent · <kbd>/</kbd> insert · <kbd>⌘Z</kbd> undo · <kbd>Space</kbd>+drag pan · <kbd>⌘</kbd>+scroll zoom</div></aside>
+<div id="fx-toasts"></div>
+<script type="application/json" id="fx-boot">${bootJson}</script>
+<script type="module" src="/assets/editor.js"></script>
+</body></html>`;
 }
 
 /** A page containing exactly one frame at (0,0): used for screenshots and present mode. */
