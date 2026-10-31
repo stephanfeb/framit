@@ -1,10 +1,10 @@
-// Bundles the browser editor runtime (src/runtime) into dist/runtime/editor.js.
+// Bundles the browser runtimes (src/runtime) into dist/runtime/: editor.js and player.js.
 // Kept separate from tsup because it targets the browser, not Node.
 import { build } from "esbuild";
 
 await build({
-  entryPoints: ["src/runtime/editor.ts"],
-  outfile: "dist/runtime/editor.js",
+  entryPoints: { editor: "src/runtime/editor.ts", player: "src/runtime/player.ts" },
+  outdir: "dist/runtime",
   bundle: true,
   format: "esm",
   platform: "browser",

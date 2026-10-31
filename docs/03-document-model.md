@@ -238,8 +238,13 @@ A flow places existing screens on a canvas and draws edges between hotspots.
 }
 ```
 
-Any `button`, `link`, or `nav` item with a `to` prop is a hotspot. In preview mode the
-runtime navigates between screens; in flow view the edges are drawn.
+Any `button`, `link`, `nav` item, `tabbar` item or `list` item with a `to` prop is a hotspot.
+In preview mode the runtime navigates between screens; in flow view the edges are drawn.
+
+*As built (M3):* a flow has no `theme` of its own, because each screen keeps its own theme. It has
+an optional `device` that picks each step's frame when `frame` is omitted. Steps take an optional
+`label`, and `edges` is optional. Edges are derived from hotspots. An explicit edge adds a label, or
+makes a node without a `to` prop navigate. Each screen appears at most once per flow.
 
 ## Identity and patching
 

@@ -48,7 +48,7 @@ function frameLabel(f: PlacedFrame): string {
 }
 
 /** A render context for one frame. Exported so the swatch sheet can render nodes directly. */
-export function createCtx(theme: ResolvedTheme, frameWidth: number, frameId: string, warnings: RenderWarning[]): RenderCtx {
+export function createCtx(theme: ResolvedTheme, frameWidth: number, frameId: string, warnings: RenderWarning[], links?: Record<string, string>): RenderCtx {
   const ctx: RenderCtx = {
     theme,
     frameWidth,
@@ -67,19 +67,30 @@ export function createCtx(theme: ResolvedTheme, frameWidth: number, frameId: str
     },
     attrs: (node, className, style) => {
       const merged = [css(style ?? {}), styleCss(node.style)].filter(Boolean).join(";");
-      return `${node.id ? `data-node="${esc(node.id)}" ` : ""}data-type="${esc(node.type)}" class="${className}"${merged ? ` style="${esc(merged)}"` : ""}`;
+      // Explicit flow links come first so they win over a component's own data-to.
+      const to = node.id && links?.[node.id] ? `data-to="${esc(links[node.id]!)}" ` : "";
+      return `${to}${node.id ? `data-node="${esc(node.id)}" ` : ""}data-type="${esc(node.type)}" class="${className}"${merged ? ` style="${esc(merged)}"` : ""}`;
     },
     warn: (node, message) => warnings.push({ frame: frameId, node, message }),
   };
   return ctx;
 }
 
+export interface FrameRenderOptions {
+  /** Screen id, recorded on the frame so the prototype runtime knows where it is. */
+  screen?: string;
+  /** Node id → target screen: extra hotspots declared by a flow's edges. */
+  links?: Record<string, string>;
+}
+
+export const deviceName = (device: FrameT["device"]) => (typeof device === "string" ? device : "custom");
+
 /** Render one frame's HTML (the `<section class="fx-frame">`), collecting warnings. */
-export function renderFrame(placed: PlacedFrame, theme: ResolvedTheme): { html: string; warnings: RenderWarning[] } {
+export function renderFrame(placed: PlacedFrame, theme: ResolvedTheme, opts: FrameRenderOptions = {}): { html: string; warnings: RenderWarning[] } {
   const warnings: RenderWarning[] = [];
-  const ctx = createCtx(theme, placed.width, placed.frame.id, warnings);
+  const ctx = createCtx(theme, placed.width, placed.frame.id, warnings, opts.links);
   const body = renderNode(placed.frame.root, ctx);
-  const html = `<section class="fx-frame" data-frame="${esc(placed.frame.id)}" data-fx-theme="${esc(theme.id)}" data-fx-fidelity="${theme.fidelity}" style="${css({
+  const html = `<section class="fx-frame" data-frame="${esc(placed.frame.id)}"${opts.screen ? ` data-screen="${esc(opts.screen)}"` : ""} data-device="${deviceName(placed.frame.device)}" data-w="${placed.width}" data-h="${placed.height}" data-fx-theme="${esc(theme.id)}" data-fx-fidelity="${theme.fidelity}" style="${css({
     width: `${placed.width}px`,
     "min-height": `${placed.height}px`,
     background: colorCss(placed.frame.background),
@@ -107,13 +118,18 @@ export function renderNode(node: AnyNode, ctx: RenderCtx): string {
 export interface PageOptions {
   /** Prefix for /assets URLs; "" for the preview server. */
   assetBase?: string;
+  /** Font file name → data: URL, for self-contained pages. */
+  inlineFonts?: Record<string, string>;
   /** Extra markup appended to <body>, e.g. the live-reload client. */
   bodyEnd?: string;
 }
 
-function head(title: string, theme: ResolvedTheme, opts: PageOptions, extraCss = "") {
-  const fontCss = BASE_CSS.replaceAll('url("/assets/', `url("${opts.assetBase ?? ""}/assets/`);
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><style>${fontCss}${UNKNOWN_CSS}${CANVAS_CSS}${compileThemeCss(theme)}${extraCss}</style></head>`;
+function head(title: string, theme: ResolvedTheme | ResolvedTheme[], opts: PageOptions, extraCss = "") {
+  let base = BASE_CSS;
+  for (const [name, dataUrl] of Object.entries(opts.inlineFonts ?? {})) base = base.replaceAll(`url("/assets/fonts/${name}")`, `url("${dataUrl}")`);
+  base = base.replaceAll('url("/assets/', `url("${opts.assetBase ?? ""}/assets/`);
+  const themes = [...new Map((Array.isArray(theme) ? theme : [theme]).map((t) => [t.id, t])).values()];
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><style>${base}${UNKNOWN_CSS}${CANVAS_CSS}${themes.map(compileThemeCss).join("")}${extraCss}</style></head>`;
 }
 
 /**
@@ -128,7 +144,7 @@ export function renderCanvas(screen: Screen, theme: ResolvedTheme, opts: { norma
   const minY = opts.normalize ? Math.min(...placed.map((p) => p.y)) : 0;
   const html = placed
     .map((p) => {
-      const r = renderFrame(p, theme);
+      const r = renderFrame(p, theme, { screen: screen.id });
       warnings.push(...r.warnings);
       return `<div class="fx-frame-slot" data-slot="${esc(p.frame.id)}" data-x="${p.x}" data-y="${p.y}" style="left:${p.x - minX}px;top:${p.y - minY}px"><div class="fx-frame-label" data-frame-label="${esc(p.frame.id)}">${esc(frameLabel(p))}</div>${r.html}</div>`;
     })
@@ -152,7 +168,7 @@ export function renderEditorPage(screen: Screen, theme: ResolvedTheme, boot: Rec
   return `${head(`${screen.name} · Framit`, theme, opts, opts.editorCss)}<body class="fx-editor" data-fx-mode="${theme.mode}" data-mode="design">
 <header id="fx-bar"><div class="fx-bar-left"><a class="fx-bar-home" href="/" title="All screens">◆</a><b class="fx-bar-name">${esc(screen.name)}</b><span class="fx-bar-meta">${esc(screen.id)} · ${esc(theme.name)}</span></div>
 <div class="fx-bar-mid"><div class="fx-seg" role="tablist"><button data-mode-btn="design" class="is-on" title="Design (V)">Design</button><button data-mode-btn="preview" title="Preview (P)">Preview</button></div></div>
-<div class="fx-bar-right"><span id="fx-status" class="fx-status"></span><button id="fx-undo" title="Undo (⌘Z)" disabled>↶</button><button id="fx-redo" title="Redo (⇧⌘Z)" disabled>↷</button><button id="fx-insert" title="Insert component (/ or ⌘K)">＋</button><button id="fx-zoom" title="Zoom to fit (⇧1)">100%</button><button id="fx-panel-toggle" title="Toggle inspector (⌘\\)">☰</button></div></header>
+<div class="fx-bar-right"><span id="fx-status" class="fx-status"></span><button id="fx-undo" title="Undo (⌘Z)" disabled>↶</button><button id="fx-redo" title="Redo (⇧⌘Z)" disabled>↷</button><button id="fx-insert" title="Insert component (/ or ⌘K)">＋</button><button id="fx-present" title="Present (⌘⇧P)">▶</button><button id="fx-zoom" title="Zoom to fit (⇧1)">100%</button><button id="fx-panel-toggle" title="Toggle inspector (⌘\\)">☰</button></div></header>
 <div id="fx-viewport"><div id="fx-canvas" data-screen="${esc(screen.id)}">${c.html}</div></div>
 <div id="fx-overlay"></div>
 <aside id="fx-inspector"><div class="fx-insp-empty">Select something to inspect it.<br><br><kbd>Click</kbd> select · <kbd>Click</kbd> again to go deeper · <kbd>Dbl-click</kbd> edit text · <kbd>Esc</kbd> parent · <kbd>/</kbd> insert · <kbd>⌘Z</kbd> undo · <kbd>Space</kbd>+drag pan · <kbd>⌘</kbd>+scroll zoom</div></aside>
@@ -166,7 +182,7 @@ export function renderEditorPage(screen: Screen, theme: ResolvedTheme, boot: Rec
 export function renderFramePage(screen: Screen, frameId: string, theme: ResolvedTheme, opts: PageOptions = {}): { html: string; warnings: RenderWarning[]; placed: PlacedFrame } | null {
   const placed = placeFrames(screen, theme).find((p) => p.frame.id === frameId);
   if (!placed) return null;
-  const r = renderFrame(placed, theme);
+  const r = renderFrame(placed, theme, { screen: screen.id });
   return { html: `${head(`${screen.name} · ${frameLabel(placed)}`, theme, opts)}<body class="fx-frame-page">${r.html}${opts.bodyEnd ?? ""}</body></html>`, warnings: r.warnings, placed };
 }
 

@@ -47,7 +47,7 @@ a new session shows exactly that.
 delete, keyboard nudging. Runtime is ~13 KB gzipped. The acceptance criterion is an automated
 test (`test/editor.test.ts`, "M2 acceptance").
 
-## M3 · Preview mode and flows
+## M3 · Preview mode and flows ✅
 
 - Preview mode with live form controls and hotspot navigation.
 - `flow` documents and the flow canvas with edges between screens.
@@ -56,6 +56,11 @@ test (`test/editor.test.ts`, "M2 acceptance").
 
 **Done when:** a three-screen onboarding flow can be clicked through and exported as one HTML
 file that works offline.
+
+*Shipped:* the acceptance criterion is an automated test (`test/prototype.test.ts`, "M3
+acceptance"). It opens the exported file from `file://` with every network request blocked and
+clicks through all three screens. The ~170 KB file includes both fonts. ADR-010 covers the player
+design.
 
 ## M4 · Diagrams
 

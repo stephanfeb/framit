@@ -56,12 +56,13 @@ const settings = {
 };
 
 describe("framit MCP server", () => {
-  it("advertises the M1 tools", async () => {
+  it("advertises the M1–M3 tools", async () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(
       [
         "create_theme", "delete_screen", "delete_theme", "describe_dsl", "duplicate_screen", "get_project", "get_theme", "init_project",
         "list_components", "list_screens", "list_themes", "patch_screen", "read_screen", "render", "update_theme", "write_screen",
+        "write_flow", "patch_flow", "read_flow", "list_flows", "delete_flow", "export",
       ].sort(),
     );
     expect(client.getInstructions()).toContain("describe_dsl");

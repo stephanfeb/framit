@@ -30,7 +30,13 @@ The server roots itself at the client's working directory and stores everything 
 > and a component reference generated from the registry); the JSON Schema is opt-in via `jsonSchema`.
 > `create_theme` takes `from` (copy a theme as the starting point) as well as `extends` (live link).
 > Screen and theme documents are passed as plain objects and validated server-side, so the tool list stays
-> small and validation errors can carry hints. `screenshot`, `export`, `open` and `lint` are not built yet.
+> small and validation errors can carry hints. `screenshot`, `open` and `lint` are not built yet.
+
+> **Implementation notes (M3).** Flows: `write_flow`, `patch_flow`, `read_flow`, `list_flows`,
+> `delete_flow`; `describe_dsl kind=flow` explains them. Flow results carry the canvas `url`, a `playUrl`
+> (present mode), the resolved steps and edges (derived from `to` hotspots plus explicit edges), and
+> warnings for steps no hotspot leads to. `export` takes `kind: screen|flow`, `format`, `frame?`, `out?`;
+> `out` must stay inside the project. `write_screen` warns about hotspots whose target screen does not exist.
 
 
 ### Project
@@ -64,7 +70,7 @@ The server roots itself at the client's working directory and stores everything 
 ### Diagrams and flows
 
 Same CRUD shape: `write_diagram`, `patch_diagram`, `read_diagram`, `list_diagrams`,
-`delete_diagram`, and the same five for flows. `write_diagram` output includes the computed
+`delete_diagram` (M4), and the same five for flows (built in M3). `write_diagram` output includes the computed
 layout (node positions after elk) so the model can reason about it or pin nodes.
 
 ### Rendering and export

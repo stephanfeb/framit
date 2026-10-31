@@ -168,3 +168,23 @@ plain HTTP where origin and content-type checks already apply.
 
 **Consequences.** Shutdown must close open event streams (`closeAllConnections`) or the HTTP
 server never finishes closing.
+
+---
+
+## ADR-010 · Present mode and HTML export are the same page, with frames embedded
+
+**Status:** accepted · 2026-10-31
+
+**Decision.** The player page embeds, as `<template>` elements, every frame of every screen
+reachable from the start through hotspots and flow edges. It navigates with URL hashes. The server
+serves the page for present mode (adding live reload), and `export` writes the same page with
+fonts and the runtime inlined.
+
+**Reasons.** One code path means the export behaves exactly like present mode, and it cannot
+depend on the server by accident: the acceptance test runs it with the network blocked.
+Prototypes are small (tens of frames), so embedding everything costs little, and navigation is
+instant.
+
+**Consequences.** Reachability is capped at 60 screens. A screen linked only from outside the
+start set is absent, and its hotspot toasts "No screen". The editor's Preview mode fetches frames
+from the server instead, because there the documents change while you look at them.

@@ -7,6 +7,7 @@ import { Inspector } from "./inspector.js";
 import { frameOf, getPointer, isContainer, isDescendant, locate, newId, withFreshIds, type Meta, type Node, type ScreenDoc } from "./model.js";
 import { Overlay } from "./overlay.js";
 import { openPalette } from "./palette.js";
+import { crossfade, frameInfoOf, injectPrototypeCss, pickFrame, prototypeClick } from "./prototype.js";
 import { Viewport } from "./viewport.js";
 
 export const FRAMIT_RUNTIME_VERSION = "0.1.0";
@@ -47,6 +48,8 @@ export class Editor {
   private queue: Promise<void> = Promise.resolve();
   private pending = 0;
   private spaceDown = false;
+  /** Preview-mode navigation: what each navigated frame slot showed before, newest last. */
+  private navStack: Array<{ slot: string; html: string }> = [];
 
   constructor(boot: { id: string; revision: number }) {
     const clientId = `tab_${newId("c").slice(2)}`;
@@ -61,6 +64,7 @@ export class Editor {
       document.getElementById("fx-zoom")!.textContent = `${Math.round(this.viewport.view.z * 100)}%`;
     };
     this.viewport.onChange();
+    injectPrototypeCss();
   }
 
   async start() {
@@ -221,6 +225,7 @@ export class Editor {
   }
 
   async reload() {
+    this.navStack = [];
     this.doc = await this.api.doc();
     this.revision = this.doc.revision;
     await this.rerender("canvas");
@@ -462,6 +467,11 @@ export class Editor {
       this.overlay.schedule();
     });
 
+    vp.addEventListener("click", (e) => {
+      if (this.mode === "preview") prototypeClick(e, (to, frame) => void this.previewNavigate(to, frame));
+    });
+    window.addEventListener("popstate", (e) => void this.previewBack((e.state as { fxNav?: number } | null)?.fxNav ?? 0));
+
     vp.addEventListener("pointerdown", (e) => this.onPointerDown(e));
     this.overlay.el.addEventListener("pointerdown", (e) => {
       const handle = (e.target as HTMLElement).closest<HTMLElement>(".fx-ov-handle");
@@ -702,8 +712,49 @@ export class Editor {
 
   // ---------- keyboard & bar ----------
 
+  // ---------- preview navigation ----------
+
+  /** Swap a frame for the target screen's frame of the same device, like the player does. */
+  async previewNavigate(to: string, frameEl: HTMLElement) {
+    const slot = frameEl.closest<HTMLElement>(".fx-frame-slot");
+    if (!slot) return;
+    let frames;
+    try {
+      frames = await this.api.screenFrames(to);
+    } catch {
+      return this.toast(`No screen “${to}”.`, true);
+    }
+    const target = pickFrame(frames.map((f) => ({ ...f, screen: to })), frameInfoOf(frameEl));
+    if (!target) return;
+    this.navStack.push({ slot: slot.dataset.slot!, html: frameEl.outerHTML });
+    history.pushState({ fxNav: this.navStack.length }, "");
+    await crossfade(slot, () => (frameEl.outerHTML = target.html));
+  }
+
+  /** Browser Back in preview: restore frames until the stack matches the history entry. */
+  private async previewBack(depth: number) {
+    // Take the entries off synchronously: a navigation during the fade must not be undone too.
+    const undo = this.navStack.splice(depth).reverse();
+    for (const prev of undo) {
+      const slot = this.canvas.querySelector<HTMLElement>(`.fx-frame-slot[data-slot="${cssEscape(prev.slot)}"]`);
+      const cur = slot?.querySelector<HTMLElement>(".fx-frame");
+      if (slot && cur) await crossfade(slot, () => (cur.outerHTML = prev.html));
+    }
+  }
+
+  /** Present mode: the player, starting at the selected frame (or the first). */
+  present() {
+    const sel = this.selection[0];
+    const frame = sel ? (frameOf(this.doc, sel)?.id ?? locate(this.doc, sel)?.frame.id) : undefined;
+    location.href = `/p/screen/${encodeURIComponent(this.doc.id)}${frame ? `?frame=${encodeURIComponent(frame)}` : ""}`;
+  }
+
   setMode(mode: "design" | "preview") {
     if (this.editing) this.endEdit(true);
+    if (mode === "design" && this.navStack.length) {
+      this.navStack = [];
+      void this.rerender("canvas");
+    }
     this.mode = mode;
     document.body.dataset.mode = mode;
     document.querySelectorAll<HTMLElement>("[data-mode-btn]").forEach((b) => b.classList.toggle("is-on", b.dataset.modeBtn === mode));
@@ -716,6 +767,7 @@ export class Editor {
     document.getElementById("fx-undo")!.addEventListener("click", () => this.undo());
     document.getElementById("fx-redo")!.addEventListener("click", () => this.redo());
     document.getElementById("fx-insert")!.addEventListener("click", () => openPalette(this));
+    document.getElementById("fx-present")!.addEventListener("click", () => this.present());
     document.getElementById("fx-zoom")!.addEventListener("click", () => this.viewport.fit());
     document.getElementById("fx-panel-toggle")!.addEventListener("click", () => this.togglePanel());
   }
@@ -744,6 +796,7 @@ export class Editor {
         e.preventDefault();
         return;
       }
+      if (mod && e.shiftKey && k.toLowerCase() === "p") return void (e.preventDefault(), this.present());
       if (mod && k.toLowerCase() === "z") return void (e.preventDefault(), e.shiftKey ? this.redo() : this.undo());
       if (mod && k.toLowerCase() === "y") return void (e.preventDefault(), this.redo());
       if (mod && k === "\\") return void (e.preventDefault(), this.togglePanel());

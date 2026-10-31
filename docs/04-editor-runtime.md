@@ -133,6 +133,26 @@ always present. Read-only JSON of the node is available under a disclosure for d
   device, with a 150ms crossfade, and pushes history so browser back works.
 - A "Present" variant (`⌘⇧P`) hides the shell and shows one frame full-bleed for demos.
 
+### As built (M3)
+
+There are two browser runtimes: `editor.js` and `player.js` (~4 KB gzipped). They share
+`runtime/prototype.ts`: the click handling for live controls (tabs, tab bars, nav items),
+hotspot navigation and the 150 ms crossfade. A hotspot is any element with `data-to`. Components
+emit it from their `to` props, and the renderer adds it for nodes named by a flow's explicit
+edges. Target frames are chosen by device (`data-device` on each frame), then by equal width,
+then by nearest width.
+
+- **Editor Preview mode** fetches the target screen's frames from `/api/render/screen/:id`, swaps
+  the frame in its slot, and pushes a history entry, so browser Back restores it. Going back to
+  Design restores the canvas. Nothing is saved.
+- **Player** (`/p/screen/:id?frame=`, `/p/flow/:id`, and the HTML export) embeds every frame of
+  every screen reachable through hotspots as a `<template>`. It navigates with `#/<screen>/<frame>`
+  hashes, so it works from `file://`. Its controls bar has Back, the step counter, ‹ › to step through
+  a flow (also ← →), restart, hotspot hints (H), and close (Esc).
+- **Flow canvas** (`/f/:id`) is drawn by `player.js`. Arrows run from each hotspot's element to the
+  target frame, forward on the right and backward on the left. Explicit edges are dashed, and
+  labels are pills.
+
 ## Performance budget
 
 - Runtime bundle under 60 KB gzipped, no framework.

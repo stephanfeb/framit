@@ -18,6 +18,8 @@ export class Api {
   doc = () => this.json<ScreenDoc>(`/api/doc/screen/${encodeURIComponent(this.id)}`);
   meta = () => this.json<Meta>("/api/meta");
   canvas = () => this.json<{ revision: number; html: string }>(`/api/render/canvas/${encodeURIComponent(this.id)}`);
+  /** Every frame of any screen, for preview-mode navigation. */
+  screenFrames = (id: string) => this.json<Array<{ frame: string; name?: string; device: string; width: number; height: number; html: string }>>(`/api/render/screen/${encodeURIComponent(id)}`);
   frame = async (fid: string) => (await this.json<Array<{ frame: string; html: string }>>(`/api/render/screen/${encodeURIComponent(this.id)}?frame=${encodeURIComponent(fid)}`))[0];
 
   async patch(baseRevision: number, ops: Op[]): Promise<PatchResult> {

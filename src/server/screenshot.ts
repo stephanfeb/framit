@@ -10,6 +10,10 @@ export interface CaptureOptions {
   maxHeight?: number;
   /** CSS selector of the element to capture. */
   selector?: string;
+  /** Wait for this selector before capturing (pages that finish drawing in script). */
+  waitFor?: string;
+  /** Skip the layout checks (they only make sense for single frames). */
+  noIssues?: boolean;
 }
 
 export interface LayoutIssue {
@@ -65,15 +69,27 @@ export class Screenshotter {
       const page = await context.newPage();
       await page.goto(url, { waitUntil: "load" });
       await page.evaluate(() => document.fonts.ready);
+      if (opts.waitFor) await page.waitForSelector(opts.waitFor, { timeout: 10_000 });
       const selector = opts.selector ?? ".fx-frame";
       const el = page.locator(selector).first();
       const box = await el.boundingBox();
       if (!box) throw new FramitError("RENDER", `Nothing to capture at ${selector}.`);
       const height = Math.min(box.height, opts.maxHeight ?? opts.height * 4);
       const png = await page.screenshot({ clip: { x: box.x, y: box.y, width: box.width, height }, fullPage: true, type: "png" });
-      const issues = await page.evaluate(detectLayoutIssues, { selector, deviceHeight: opts.height });
+      const issues = opts.noIssues ? [] : await page.evaluate(detectLayoutIssues, { selector, deviceHeight: opts.height });
       if (box.height > height) issues.push({ message: `Screenshot truncated at ${Math.round(height)}px of ${Math.round(box.height)}px.` });
       return { png, width: Math.round(box.width), height: Math.round(height), issues };
+    } finally {
+      await context.close();
+    }
+  }
+
+  /** Run `fn` with a fresh page in its own context (closed afterwards). */
+  async withPage<T>(viewport: { width: number; height: number }, fn: (page: import("playwright").Page) => Promise<T>): Promise<T> {
+    const browser = await this.launch();
+    const context = await browser.newContext({ viewport });
+    try {
+      return await fn(await context.newPage());
     } finally {
       await context.close();
     }

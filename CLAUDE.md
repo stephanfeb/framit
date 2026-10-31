@@ -62,7 +62,7 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 
 ```bash
 npm install
-npm run build      # dist/cli.js (server) + dist/runtime/editor.js (browser runtime)
+npm run build      # dist/cli.js (server) + dist/runtime/{editor,player}.js (browser runtimes)
 npm test           # vitest; test/screenshot.test.ts needs Chromium or Chrome
 npm run typecheck
 ```

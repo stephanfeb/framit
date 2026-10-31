@@ -1,3 +1,4 @@
+import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
@@ -16,6 +17,9 @@ import { VERSION } from "../version.js";
 import { PreviewServer } from "./preview.js";
 import { Screenshotter } from "./screenshot.js";
 import { Workspace } from "./workspace.js";
+import { Flow, FLOW_GUIDE, screenHotspots, type FlowT } from "../schema/flow.js";
+import { buildFlowView, checkFlow, loadFlow, type ProtoWarning } from "./prototype.js";
+import { runExport, type ExportFormat } from "./export.js";
 
 const INSTRUCTIONS = `Framit turns descriptions into editable, themed wireframes (desktop and mobile screens) stored in
 .framit/ in the current project, with a local browser preview.
@@ -27,6 +31,11 @@ Typical session:
 4. write_screen, then LOOK at the returned screenshots and fix problems with patch_screen.
 5. Give the user the preview URL. It opens an editor: they can select, retype text, change props,
    reorder, insert and move frames, and every edit is saved to the screen document.
+
+Prototypes: give buttons, links, nav/tab bar/list items a \`to\` prop naming another screen id, and they
+navigate in Preview mode, in Present mode (/p/screen/<id>) and in exported HTML. A flow (write_flow) puts
+screens in order on one canvas with arrows; describe_dsl kind=flow explains it. export writes PNG, PDF or
+a single offline HTML prototype.
 
 Because people edit screens in the browser, read_screen before changing an existing screen and prefer
 patch_screen, which leaves their edits intact.`;
@@ -81,6 +90,8 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
     const { doc, screen, theme } = await ws.screen(id);
     const url = await preview.ensureStarted();
     const warnings: RenderWarning[] = [...renderScreenPage(screen, theme).warnings];
+    const known = new Set((await store.list("screen")).map((s) => s.id));
+    for (const h of screenHotspots(doc)) if (!known.has(h.to)) warnings.push({ node: h.node, message: `Hotspot leads to "${h.to}", which is not a screen (yet). It does nothing until that screen exists.` });
     const placed = placeFrames(screen, theme).filter((p) => !want.frames || want.frames.includes(p.frame.id));
     const images: Image[] = [];
     if (want.screenshots && screenshotsEnabled) {
@@ -135,6 +146,47 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
     return { doc, changed, resolved };
   }
 
+  /** A flow's tool result: URLs, steps, edges, warnings and a screenshot of the flow canvas. */
+  async function flowResult(id: string, extra: Record<string, unknown>, wantShot: boolean, preWarnings: ProtoWarning[] = []): Promise<Out> {
+    const v = await buildFlowView(ws, id);
+    const url = await preview.ensureStarted();
+    const warnings: ProtoWarning[] = [...preWarnings];
+    for (const o of v.outside) warnings.push({ screen: o.screen, node: o.node, message: `Hotspot leads to "${o.to}", which is not a step of this flow (no arrow; it still navigates when playing if that screen exists).` });
+    const inbound = new Set(v.edges.map((e) => e.to));
+    v.steps.slice(1).forEach((s, i) => {
+      if (!inbound.has(s.screen)) warnings.push({ screen: s.screen, message: `Step ${i + 2} ("${s.label}") has no hotspot leading to it. Give a button or link in an earlier step \`to: "${s.screen}"\`, or add an edge.` });
+    });
+    const images: Image[] = [];
+    if (wantShot && screenshotsEnabled) {
+      try {
+        const cap = await shots.capture(`${url}/f/${encodeURIComponent(id)}?shot`, { width: v.width + 48, height: v.height + 48, scale: v.width > 2400 ? 0.5 : 1, selector: "#fx-flow-wrap", waitFor: "body[data-ready]", maxHeight: 6000, noIssues: true });
+        images.push({ label: `Flow ${id} (${v.steps.length} steps, ${v.edges.length} arrows):`, png: cap.png });
+      } catch (err) {
+        warnings.push({ message: `Screenshot unavailable: ${(err as Error).message}` });
+      }
+    }
+    return {
+      data: {
+        id: v.doc.id,
+        revision: v.doc.revision,
+        ...extra,
+        url: `${url}/f/${encodeURIComponent(id)}`,
+        playUrl: `${url}/p/flow/${encodeURIComponent(id)}`,
+        steps: v.steps.map((s, i) => ({ step: i + 1, screen: s.screen, frame: s.frame, label: s.label, device: s.device })),
+        edges: v.edges.map((e) => ({ from: `${e.from.screen}/${e.from.node}`, to: e.to, label: e.label, explicit: e.explicit || undefined })),
+        warnings,
+      },
+      images,
+    };
+  }
+
+  async function saveFlow(input: Record<string, unknown>, opts: { expectedRevision?: number; screenshots: boolean }) {
+    const flow: FlowT = validate(Flow, input, "flow");
+    const warnings = await checkFlow(ws, flow);
+    const { doc, changed } = await store.write("flow", { ...flow, kind: "flow" }, { expectedRevision: opts.expectedRevision, source: "mcp" });
+    return flowResult(doc.id, { changed }, opts.screenshots, warnings);
+  }
+
   // ---------- project ----------
 
   mcp.registerTool(
@@ -177,19 +229,21 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
       title: "Describe the Framit DSL",
       description: "The authoring guide and full component reference for screens (and themes). Call once per session before writing screens. Set jsonSchema=true only if you need the formal JSON Schema.",
       inputSchema: {
-        kind: z.enum(["screen", "theme"]).default("screen"),
+        kind: z.enum(["screen", "theme", "flow"]).default("screen"),
         jsonSchema: z.boolean().default(false).describe("Also return the JSON Schema (large)."),
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ kind, jsonSchema }: { kind: "screen" | "theme"; jsonSchema: boolean }): Promise<CallToolResult> => {
+    async ({ kind, jsonSchema }: { kind: "screen" | "theme" | "flow"; jsonSchema: boolean }): Promise<CallToolResult> => {
       const text =
         kind === "theme"
           ? THEME_GUIDE
-          : `${SCREEN_GUIDE}\n## Component reference\n${TYPE_LEGEND}\n\n${componentReference()}\n`;
+          : kind === "flow"
+            ? FLOW_GUIDE
+            : `${SCREEN_GUIDE}\n## Component reference\n${TYPE_LEGEND}\n\n${componentReference()}\n`;
       const content: CallToolResult["content"] = [{ type: "text", text }];
       if (jsonSchema) {
-        const schema = kind === "theme" ? ResolvedTheme : Screen;
+        const schema = kind === "theme" ? ResolvedTheme : kind === "flow" ? Flow : Screen;
         content.push({ type: "text", text: JSON.stringify(z.toJSONSchema(schema, { io: "input", unrepresentable: "any" })) });
       }
       return { content };
@@ -444,7 +498,9 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
     },
     tool(async ({ id }: { id: string }) => {
       await store.delete("screen", id);
-      return { data: { deleted: id } };
+      const flows: string[] = [];
+      for (const f of await store.list("flow")) if (((await store.read("flow", f.id)).steps as Array<{ screen: string }> | undefined)?.some((s) => s.screen === id)) flows.push(f.id);
+      return { data: { deleted: id, ...(flows.length ? { brokenFlows: flows, hint: "These flows still list the screen as a step; patch_flow to remove it." } : {}) } };
     }),
   );
 
@@ -469,17 +525,135 @@ export function createFramitServer(store: Store, opts: { screenshots?: boolean }
     "render",
     {
       title: "Render",
-      description: "Preview URL plus fresh screenshots of a screen (optionally one frame) or a theme's swatch sheet. Use to show the user or to re-check after browser edits.",
-      inputSchema: { kind: z.enum(["screen", "theme"]).default("screen"), id: z.string(), frame: z.string().optional() },
+      description: "Preview URL plus fresh screenshots of a screen (optionally one frame), a flow's canvas, or a theme's swatch sheet. Use to show the user or to re-check after browser edits.",
+      inputSchema: { kind: z.enum(["screen", "theme", "flow"]).default("screen"), id: z.string(), frame: z.string().optional() },
       annotations: { readOnlyHint: true },
     },
-    tool(async ({ kind, id, frame }: { kind: "screen" | "theme"; id: string; frame?: string }) => {
+    tool(async ({ kind, id, frame }: { kind: "screen" | "theme" | "flow"; id: string; frame?: string }) => {
+      if (kind === "flow") return flowResult(id, {}, true);
       if (kind === "theme") {
         await ws.themeDoc(id);
         const sw = await swatch(id);
         return { data: { url: sw.url, warning: sw.warning }, images: sw.image ? [sw.image] : [] };
       }
       return screenResult(id, {}, { screenshots: true, frames: frame ? [frame] : undefined });
+    }),
+  );
+
+  // ---------- flows ----------
+
+  mcp.registerTool(
+    "write_flow",
+    {
+      title: "Write flow",
+      description:
+        "Create or replace a flow: existing screens in order on one canvas, with arrows from hotspots (`to` props) between them. " +
+        "Write the screens first and give their buttons/links `to: \"<screen id>\"`. Returns the flow canvas screenshot, a playUrl that clicks through it, " +
+        "and warnings for steps nothing leads to. See describe_dsl kind=flow.",
+      inputSchema: {
+        flow: Obj.describe('Flow document: { id?, name, device?, steps: [{ screen, frame?, label? }], edges?: [{ from: { screen, node }, to, label? }] }.'),
+        expectedRevision: z.number().int().optional(),
+        screenshots: z.boolean().default(true),
+      },
+    },
+    tool(async ({ flow, expectedRevision, screenshots }: { flow: Record<string, unknown>; expectedRevision?: number; screenshots: boolean }) => {
+      const input: Record<string, unknown> = { ...flow };
+      if (!input.id && typeof input.name === "string") input.id = slugify(input.name);
+      return saveFlow(input, { expectedRevision, screenshots });
+    }),
+  );
+
+  mcp.registerTool(
+    "patch_flow",
+    {
+      title: "Patch flow",
+      description: 'Change part of a flow with JSON Patch, e.g. {op:"add", path:"/steps/-", value:{screen:"done"}} or {op:"replace", path:"/edges/0/label", value:"Tap Next"}.',
+      inputSchema: { id: z.string(), ops: z.array(PatchOp).min(1), expectedRevision: z.number().int().optional(), screenshots: z.boolean().default(true) },
+    },
+    tool(async ({ id, ops, expectedRevision, screenshots }: { id: string; ops: PatchOp[]; expectedRevision?: number; screenshots: boolean }) => {
+      const current = await store.read("flow", id);
+      if (expectedRevision !== undefined && current.revision !== expectedRevision) {
+        throw new FramitError("REVISION", `Flow "${id}" is at revision ${current.revision}, not ${expectedRevision}.`, { data: { current } });
+      }
+      const { revision: _r, updatedAt: _u, ...next } = applyPatch(current, ops);
+      return saveFlow({ ...next, id }, { expectedRevision: current.revision, screenshots });
+    }),
+  );
+
+  mcp.registerTool(
+    "read_flow",
+    {
+      title: "Read flow",
+      description: "A flow document with its resolved steps and edges (including those derived from hotspots), canvas URL and play URL.",
+      inputSchema: { id: z.string(), screenshots: z.boolean().default(false) },
+      annotations: { readOnlyHint: true },
+    },
+    tool(async ({ id, screenshots }: { id: string; screenshots: boolean }) => {
+      const { doc } = await loadFlow(ws, id);
+      const r = await flowResult(id, {}, screenshots);
+      return { data: { document: doc, ...(r.data as object) }, images: r.images };
+    }),
+  );
+
+  mcp.registerTool(
+    "list_flows",
+    {
+      title: "List flows",
+      description: "All flows with their steps and revision.",
+      inputSchema: {},
+      annotations: { readOnlyHint: true },
+    },
+    tool(async () => {
+      const flows = [];
+      for (const f of await store.list("flow")) {
+        const d = await store.read("flow", f.id);
+        flows.push({ id: f.id, name: f.name, description: d.description, steps: (d.steps as Array<{ screen: string }>).map((s) => s.screen), revision: f.revision, updatedAt: f.updatedAt });
+      }
+      return { data: { flows, previewUrl: preview.running ?? null } };
+    }),
+  );
+
+  mcp.registerTool(
+    "delete_flow",
+    {
+      title: "Delete flow",
+      description: "Delete a flow document. Its screens are not touched.",
+      inputSchema: { id: z.string() },
+      annotations: { destructiveHint: true },
+    },
+    tool(async ({ id }: { id: string }) => {
+      await store.delete("flow", id, "mcp");
+      return { data: { deleted: id } };
+    }),
+  );
+
+  // ---------- export ----------
+
+  mcp.registerTool(
+    "export",
+    {
+      title: "Export",
+      description:
+        "Write a screen or flow to disk. html: ONE self-contained file that works offline, a clickable prototype (hotspots navigate; arrow keys step through a flow). " +
+        "pdf: one page per frame (flow: per step). png: one image per frame in a folder (flow: plus an overview). Default location .framit/exports/; `out` is a path inside the project.",
+      inputSchema: {
+        kind: z.enum(["screen", "flow"]).default("screen"),
+        id: z.string(),
+        format: z.enum(["html", "pdf", "png"]),
+        frame: z.string().optional().describe("Screen exports: start at (html) or only include (png, pdf) this frame."),
+        out: z.string().optional().describe("File (html, pdf) or folder (png), relative to the project root."),
+      },
+    },
+    tool(async ({ kind, id, format, frame, out }: { kind: "screen" | "flow"; id: string; format: ExportFormat; frame?: string; out?: string }) => {
+      const r = await runExport({ ws, preview, shots }, kind === "flow" ? { kind, id } : { kind, id, frame }, format, out);
+      return {
+        data: {
+          format,
+          files: r.files.map((f) => ({ ...f, path: f.path, relative: path.relative(store.root, f.path) })),
+          warnings: r.warnings,
+          ...(format === "html" ? { open: `file://${r.files[0]!.path}` } : {}),
+        },
+      };
     }),
   );
 
