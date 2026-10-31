@@ -1,0 +1,78 @@
+# 07 · Roadmap
+
+Milestones are sized so each one ends with something a person can open in a browser.
+Issues are tracked in beads (`bd ready` to see what is unblocked).
+
+## M0 · Skeleton
+
+- Repo layout, TypeScript, tsup/esbuild builds, Vitest.
+- MCP server that answers `get_project`, `init_project`, `describe_dsl` with a stub schema.
+- `.framit/` store with atomic writes and revision counter.
+- CI-free; local `npm test` and `npm run dev` only.
+
+**Done when:** Claude Code can register the server and call `init_project`.
+
+## M1 · One beautiful screen
+
+- Zod schemas for `theme` and `screen`.
+- Theme compiler → CSS custom properties + component stylesheet.
+- Three starter themes: `wire-lo`, `wire-mid-light`, `wire-mid-dark`.
+- Renderer with ~15 components: app-shell, stack, row, grid, card, section, text, button,
+  input, select, table, list, nav, badge, avatar, divider.
+- Preview server (Hono) serving a static page per screen, no editing.
+- Playwright screenshot pipeline; `write_screen` returns PNGs.
+- `describe_dsl`, `list_components`, `get_theme` good enough to drive blind.
+
+**Done when:** from a fresh session, "wireframe a settings page for a SaaS app, desktop and
+phone" produces something you would paste into a doc, without the model seeing this repo.
+
+## M2 · Editable canvas
+
+- Canvas shell: pan, zoom, fit, frame drag and resize.
+- Selection with deep-select, hover labels, handles.
+- Inline text editing, floating toolbar for text and buttons.
+- Node-ID JSON Patch pipeline, `PATCH /api/doc`, revision checks, WebSocket change events.
+- Partial frame re-render from server.
+- Undo/redo.
+- Inspector panel generated from schema.
+
+**Done when:** you edit three labels and move a frame in the browser, then `read_screen` in
+a new session shows exactly that.
+
+## M3 · Preview mode and flows
+
+- Preview mode with live form controls and hotspot navigation.
+- `flow` documents and the flow canvas with edges between screens.
+- Present mode.
+- `export` to PNG, PDF, and self-contained HTML.
+
+**Done when:** a three-screen onboarding flow can be clicked through and exported as one HTML
+file that works offline.
+
+## M4 · Diagrams
+
+- `diagram` schema, elkjs layout, node kinds with icons, groups and lanes.
+- SVG edge overlay with orthogonal routing and labels.
+- Drag to pin, draw edges between nodes on the canvas.
+- Same theme, so diagrams and screens look like one document set.
+
+**Done when:** "draw the system context for this repo" yields a diagram you would put in an
+architecture doc, and you can tidy it by hand.
+
+## M5 · Catalogue and polish
+
+- Component catalogue to ~40: tabs, modal, drawer, toast, alert, stat, chart sketches,
+  empty-state, pagination, breadcrumb, toggle, radio, textarea, image, icon, kbd, code.
+- `lint` tool and overflow detection in the screenshot pass.
+- Comment mode.
+- Lo-fi sketch rendering (hand-drawn strokes via SVG filters) as a theme fidelity.
+- `new-theme` and `wireframe` MCP prompts.
+- Packaging: `npx framit serve`, Playwright install guidance, first-run message.
+
+## Later / maybe
+
+- tldraw shell (ADR-006 trigger).
+- Light/dark theme pairs via `extends` with a single toggle in the canvas.
+- Design tokens import (W3C DTCG JSON) so a real product's tokens seed a theme.
+- Sequence diagrams.
+- Figma export via the REST plugin API. Only if asked repeatedly.

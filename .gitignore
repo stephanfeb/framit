@@ -5,3 +5,13 @@
 .beads-credential-key
 .beads/proxieddb/
 *.gate.lock*
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+.DS_Store
+
+# Framit local state when dogfooding in this repo
+.framit/.cache/
+.framit/exports/
