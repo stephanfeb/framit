@@ -28,9 +28,8 @@ come without the screenshots the model uses to check its work.
 
 `npx framit doctor` checks Node, the project folder and the browser, and prints the setup lines.
 
-> The package is not on npm yet. Until it is, build from a checkout (see Development) and register
-> the local build: `claude mcp add -s user framit -- node /absolute/path/to/framit/dist/cli.js serve`.
-> `npm pack` produces the tarball that would be published.
+To run from a checkout instead, build it (see Development) and register the local build:
+`claude mcp add -s user framit -- node /absolute/path/to/framit/dist/cli.js serve`.
 
 ## Quick orientation
 

@@ -4,7 +4,13 @@
   "description": "Local MCP server that turns text descriptions into editable, themed wireframes.",
   "type": "module",
   "license": "Apache-2.0",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stephanfeb/framit.git"
+  },
+  "homepage": "https://github.com/stephanfeb/framit#readme",
+  "bugs": "https://github.com/stephanfeb/framit/issues",
+  "keywords": ["mcp", "wireframe", "claude", "design", "prototype", "diagram"],
   "bin": {
     "framit": "dist/cli.js"
   },
@@ -21,7 +27,8 @@
     "serve": "node dist/cli.js serve",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run typecheck && npm run build"
   },
   "dependencies": {
     "@fontsource-variable/inter": "5.3.0",
