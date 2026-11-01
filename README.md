@@ -106,3 +106,7 @@ runs that loop. The catalogue has 41 components, including modal, drawer, toast,
 and chart sketches. Themes with `fidelity: "lo"` (the `wire-lo` starter) render as hand-drawn sketches.
 
 See [docs/examples](docs/examples/README.md) for what a blind session produces.
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).

@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "description": "Local MCP server that turns text descriptions into editable, themed wireframes.",
   "type": "module",
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "private": true,
   "bin": {
     "framit": "dist/cli.js"
