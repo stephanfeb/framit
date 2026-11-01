@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createFramitServer } from "./server/mcp.js";
 import { Screenshotter } from "./server/screenshot.js";
 import { STORE_DIRNAME, Store } from "./store/store.js";
-import { VERSION } from "./version.js";
+import { PACKAGE, VERSION } from "./version.js";
 
 const USAGE = `framit ${VERSION}
 
@@ -95,12 +95,12 @@ async function doctor(root: string): Promise<number> {
   const viaNpx = cli.includes(`${path.sep}_npx${path.sep}`);
   console.log(`
 Add Framit to Claude Code (run in your project):
-  claude mcp add framit -- npx -y framit serve${viaNpx ? "" : `
+  claude mcp add framit -- npx -y ${PACKAGE} serve${viaNpx ? "" : `
 or, from this install:
   claude mcp add framit -- node ${cli} serve`}
 
 Other MCP clients (stdio):
-  { "mcpServers": { "framit": { "command": "npx", "args": ["-y", "framit", "serve"] } } }
+  { "mcpServers": { "framit": { "command": "npx", "args": ["-y", "${PACKAGE}", "serve"] } } }
 `);
   return failed ? 1 : 0;
 }

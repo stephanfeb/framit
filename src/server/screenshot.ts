@@ -33,7 +33,7 @@ export interface Capture {
 }
 
 export const BROWSER_HINT =
-  "Run `npx framit install-browser` (downloads the Chromium build matching Framit's Playwright), or install Google Chrome. Documents are still saved; only screenshots and export need a browser.";
+  "Run `npx @stephanfeb/framit install-browser` (downloads the Chromium build matching Framit's Playwright), or install Google Chrome. Documents are still saved; only screenshots and export need a browser.";
 
 export interface BrowserStatus {
   ok: boolean;

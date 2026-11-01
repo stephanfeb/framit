@@ -93,7 +93,7 @@ relabels an arrow, and a new MCP session then reads exactly that. The blind-sess
   passes with irregular elliptical corners, and text stays crisp. Lo-fi frames use the mono font. Applies
   to any theme with `fidelity: "lo"`, and to diagrams.
 - `new-theme` and `wireframe` MCP prompts. ✅ Plus `address-comments`.
-- Packaging: `npx framit serve`, Playwright install guidance, first-run message. ✅ `framit doctor`
+- Packaging: `npx @stephanfeb/framit serve`, Playwright install guidance, first-run message. ✅ `framit doctor`
   and `framit install-browser`; the browser falls back to an installed Chrome or Edge; `init_project`
   tells the user the preview URL and screenshot status. The tarball (`npm pack`, about 120 KB) is
   smoke-tested by installing it into an empty folder. Not yet published to npm.

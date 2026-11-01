@@ -220,7 +220,7 @@ export const code = defineComponent({
       copy: z.boolean().default(false).describe("Show a copy icon in the header."),
     })
     .strict(),
-  example: { width: 420, props: { title: "Terminal", content: "npm install framit\nnpx framit doctor", copy: true } },
+  example: { width: 420, props: { title: "Terminal", content: "npm install -g @stephanfeb/framit\nframit doctor", copy: true } },
   render: (n, ctx) => {
     const p = n.props;
     const head = p.title || p.copy ? `<div class="fx-code-head"><span>${p.title ? ctx.edit("/title", p.title) : ""}</span>${p.copy ? ctx.icon("copy", 14) : ""}</div>` : "";

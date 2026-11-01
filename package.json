@@ -1,9 +1,12 @@
 {
-  "name": "framit",
+  "name": "@stephanfeb/framit",
   "version": "0.0.1",
   "description": "Local MCP server that turns text descriptions into editable, themed wireframes.",
   "type": "module",
   "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/stephanfeb/framit.git"

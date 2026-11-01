@@ -11,7 +11,7 @@ Status: M5 (catalogue and polish) complete. See [docs/](docs/README.md) and `doc
 Framit needs Node 20 or newer. Add it to Claude Code from the project you want to wireframe:
 
 ```bash
-claude mcp add framit -- npx -y framit serve
+claude mcp add framit -- npx -y @stephanfeb/framit serve
 ```
 
 Any other MCP client uses the same command over stdio:
@@ -22,11 +22,11 @@ model creates `.framit/` in the project and gives you the local preview URL, whe
 and edit everything it draws.
 
 **Screenshots and export need a Chromium-based browser.** Framit uses an installed Google Chrome or
-Microsoft Edge if it finds one. Otherwise run `npx framit install-browser` once to download
+Microsoft Edge if it finds one. Otherwise run `npx @stephanfeb/framit install-browser` once to download
 Playwright's Chromium. Without a browser, documents are still saved and editable; tool results just
 come without the screenshots the model uses to check its work.
 
-`npx framit doctor` checks Node, the project folder and the browser, and prints the setup lines.
+`npx @stephanfeb/framit doctor` checks Node, the project folder and the browser, and prints the setup lines.
 
 To run from a checkout instead, build it (see Development) and register the local build:
 `claude mcp add -s user framit -- node /absolute/path/to/framit/dist/cli.js serve`.

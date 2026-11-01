@@ -6,7 +6,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createFramitServer, type FramitServer } from "../src/server/mcp.js";
 import { Store } from "../src/store/store.js";
-import { VERSION } from "../src/version.js";
+import { PACKAGE, VERSION } from "../src/version.js";
 
 let root: string;
 let client: Client;
@@ -135,6 +135,7 @@ describe("framit MCP server", () => {
   it("reports the same version as package.json", async () => {
     const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
     expect(VERSION).toBe(pkg.version);
+    expect(PACKAGE).toBe(pkg.name);
   });
 
   it("describes the DSL with the component reference", async () => {
